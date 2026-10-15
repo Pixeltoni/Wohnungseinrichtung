@@ -14,6 +14,10 @@ const MIN_OPENING = 30;
 
 const SIDES = ['top', 'right', 'bottom', 'left'];
 const SIDE_NAMES = { top: 'oben', right: 'rechts', bottom: 'unten', left: 'links' };
+const OPENING_NAMES = { door: 'Tür', window: 'Fenster', passage: 'Durchgang' };
+const OPENING_DEFAULT_WIDTH = { door: 90, window: 120, passage: 100 };
+const MIN_THICKNESS = 1;
+const MAX_THICKNESS = 100;
 
 const CATALOG = [
   { name: 'Doppelbett', width: 160, depth: 200, color: '#a7c7f2' },
@@ -43,10 +47,17 @@ let viewBox = null;
 
 function defaultState() {
   return {
-    rooms: [{ id: uid(), name: 'Wohnzimmer', x: 0, y: 0, width: 500, length: 400, removedWalls: [] }],
+    rooms: [{
+      id: uid(), name: 'Wohnzimmer', x: 0, y: 0, width: 500, length: 400,
+      removedWalls: [], thickness: uniformThickness(WALL),
+    }],
     furniture: [],
     openings: [],
   };
+}
+
+function uniformThickness(t) {
+  return { top: t, right: t, bottom: t, left: t };
 }
 
 function uid() {
@@ -59,6 +70,9 @@ function normalize(data) {
   if (!Array.isArray(data.openings)) data.openings = [];
   for (const r of data.rooms) {
     if (!Array.isArray(r.removedWalls)) r.removedWalls = [];
+    const t = r.thickness || {};
+    r.thickness = {};
+    for (const side of SIDES) r.thickness[side] = t[side] > 0 ? t[side] : WALL;
   }
   for (const f of data.furniture) {
     if (![0, 90, 180, 270].includes(f.rotation)) f.rotation = 0;
@@ -133,18 +147,20 @@ function pointIn(rect, x, y) {
 }
 
 // Mittellinie einer Wand. axis 'h' = waagrecht, 'v' = senkrecht.
-// start/end = Innenmaß der Wand, from/to = inkl. Ecken. inward = Richtung in den Raum.
+// start/end = Innenmaß der Wand, ext0/ext1 = Verlängerung über die Ecken (Dicke der Querwände).
+// t = Wanddicke, inward = Richtung in den Raum.
 function wallLine(r, side) {
-  const h = WALL / 2;
+  const t = r.thickness[side];
+  const th = r.thickness;
   switch (side) {
     case 'top':
-      return { axis: 'h', c: r.y - h, start: r.x, end: r.x + r.width, inward: 1 };
+      return { axis: 'h', t, c: r.y - t / 2, start: r.x, end: r.x + r.width, ext0: th.left, ext1: th.right, inward: 1 };
     case 'bottom':
-      return { axis: 'h', c: r.y + r.length + h, start: r.x, end: r.x + r.width, inward: -1 };
+      return { axis: 'h', t, c: r.y + r.length + t / 2, start: r.x, end: r.x + r.width, ext0: th.left, ext1: th.right, inward: -1 };
     case 'left':
-      return { axis: 'v', c: r.x - h, start: r.y, end: r.y + r.length, inward: 1 };
+      return { axis: 'v', t, c: r.x - t / 2, start: r.y, end: r.y + r.length, ext0: th.top, ext1: th.bottom, inward: 1 };
     default:
-      return { axis: 'v', c: r.x + r.width + h, start: r.y, end: r.y + r.length, inward: -1 };
+      return { axis: 'v', t, c: r.x + r.width + t / 2, start: r.y, end: r.y + r.length, ext0: th.top, ext1: th.bottom, inward: -1 };
   }
 }
 
@@ -152,10 +168,31 @@ function wallLength(r, side) {
   return side === 'top' || side === 'bottom' ? r.width : r.length;
 }
 
-function bandRect(axis, c, a, b) {
+const OPPOSITE = { top: 'bottom', bottom: 'top', left: 'right', right: 'left' };
+const OUTWARD = { top: [0, -1], bottom: [0, 1], left: [-1, 0], right: [1, 0] };
+
+// Liegt Raum o direkt hinter der Wand `side` von Raum r (getrennt nur durch diese Wand)?
+function isAdjacent(r, side, o, t = r.thickness[side]) {
+  const near = (a, b) => Math.abs(a - b) < 1;
+  const horizontalOverlap = o.x < r.x + r.width && r.x < o.x + o.width;
+  const verticalOverlap = o.y < r.y + r.length && r.y < o.y + o.length;
+  switch (side) {
+    case 'top': return horizontalOverlap && near(o.y + o.length, r.y - t);
+    case 'bottom': return horizontalOverlap && near(o.y, r.y + r.length + t);
+    case 'left': return verticalOverlap && near(o.x + o.width, r.x - t);
+    default: return verticalOverlap && near(o.x, r.x + r.width + t);
+  }
+}
+
+function bandRect(axis, c, a, b, t) {
   return axis === 'h'
-    ? { x: a, y: c - WALL / 2, w: b - a, h: WALL }
-    : { x: c - WALL / 2, y: a, w: WALL, h: b - a };
+    ? { x: a, y: c - t / 2, w: b - a, h: t }
+    : { x: c - t / 2, y: a, w: t, h: b - a };
+}
+
+// Zwei Wände liegen übereinander, wenn ihre Bänder sich quer zur Wand überdecken.
+function sameWallBand(g, line) {
+  return g.axis === line.axis && Math.abs(g.c - line.c) < (g.t + line.t) / 2 - 0.5;
 }
 
 function openingSpan(o) {
@@ -165,21 +202,25 @@ function openingSpan(o) {
   return { line, a, b: a + o.width };
 }
 
-// Lücken in Wänden: entfernte Wände und Türen/Fenster. Sie gelten auch für
-// die deckungsgleiche Wand des Nachbarraums.
+// Lücken in Wänden: entfernte Wände, Türen, Fenster und Durchgänge. Sie gelten
+// auch für die deckungsgleiche Wand des Nachbarraums.
 function wallGaps() {
   const gaps = [];
   for (const r of state.rooms) {
     for (const side of r.removedWalls) {
       const line = wallLine(r, side);
-      gaps.push({ kind: 'removed', axis: line.axis, c: line.c, a: line.start, b: line.end });
+      gaps.push({ kind: 'removed', axis: line.axis, c: line.c, t: line.t, a: line.start, b: line.end });
     }
   }
   for (const o of state.openings) {
     const { line, a, b } = openingSpan(o);
-    gaps.push({ kind: o.type, axis: line.axis, c: line.c, a, b });
+    gaps.push({ kind: o.type, axis: line.axis, c: line.c, t: line.t, a, b });
   }
   return gaps;
+}
+
+function gapRect(g) {
+  return bandRect(g.axis, g.c, g.a, g.b, g.t);
 }
 
 function wallPieces(gaps = wallGaps()) {
@@ -187,16 +228,16 @@ function wallPieces(gaps = wallGaps()) {
   for (const r of state.rooms) {
     for (const side of SIDES) {
       const line = wallLine(r, side);
-      let parts = [[line.start - WALL, line.end + WALL]];
+      let parts = [[line.start - line.ext0, line.end + line.ext1]];
       for (const g of gaps) {
-        if (g.axis !== line.axis || Math.abs(g.c - line.c) > 1) continue;
+        if (!sameWallBand(g, line)) continue;
         parts = parts.flatMap(([a, b]) => {
           if (g.b <= a || g.a >= b) return [[a, b]];
           return [[a, g.a], [g.b, b]].filter(([s, e]) => e - s > 0.5);
         });
       }
       for (const [a, b] of parts) {
-        pieces.push({ roomId: r.id, side, rect: bandRect(line.axis, line.c, a, b) });
+        pieces.push({ roomId: r.id, side, rect: bandRect(line.axis, line.c, a, b, line.t) });
       }
     }
   }
@@ -208,16 +249,16 @@ function obstacles() {
   const gaps = wallGaps();
   const rects = wallPieces(gaps).map((p) => p.rect);
   for (const g of gaps) {
-    if (g.kind === 'window') rects.push(bandRect(g.axis, g.c, g.a, g.b));
+    if (g.kind === 'window') rects.push(gapRect(g));
   }
   return rects;
 }
 
-// Begehbare Fläche: Rauminneres plus Durchgänge (entfernte Wände, Türen).
+// Begehbare Fläche: Rauminneres plus Öffnungen (entfernte Wände, Türen, Durchgänge).
 function walkableRects() {
   const rects = state.rooms.map(roomRect);
   for (const g of wallGaps()) {
-    if (g.kind !== 'window') rects.push(bandRect(g.axis, g.c, g.a, g.b));
+    if (g.kind !== 'window') rects.push(gapRect(g));
   }
   return rects;
 }
@@ -226,8 +267,8 @@ function walkableRects() {
 function doorGeometry(o) {
   const { line, a, b } = openingSpan(o);
   const n = line.inward * (o.swing === 'out' ? -1 : 1);
-  const face = n * WALL / 2;
-  const pt = (t, off) => (line.axis === 'h' ? [t, line.c + off] : [line.c + off, t]);
+  const face = n * line.t / 2;
+  const pt = (s, off) => (line.axis === 'h' ? [s, line.c + off] : [line.c + off, s]);
   const hingeT = o.hinge === 'end' ? b : a;
   const otherT = o.hinge === 'end' ? a : b;
   const H = pt(hingeT, face);
@@ -322,8 +363,9 @@ function snapRoomPosition(room, x, y) {
   let bestY = null;
   for (const o of state.rooms) {
     if (o.id === room.id) continue;
-    const xs = [o.x + o.width + WALL, o.x - WALL - room.width, o.x, o.x + o.width - room.width];
-    const ys = [o.y + o.length + WALL, o.y - WALL - room.length, o.y, o.y + o.length - room.length];
+    const t = o.thickness;
+    const xs = [o.x + o.width + t.right, o.x - t.left - room.width, o.x, o.x + o.width - room.width];
+    const ys = [o.y + o.length + t.bottom, o.y - t.top - room.length, o.y, o.y + o.length - room.length];
     for (const v of xs) {
       const d = Math.abs(v - x);
       if (d <= ROOM_SNAP && (!bestX || d < bestX.d)) bestX = { v, d };
@@ -350,6 +392,33 @@ function moveRoom(r, x, y) {
   }
   r.x = x;
   r.y = y;
+}
+
+// Eine gemeinsame Wand hat auf beiden Seiten dieselbe Dicke: Ein angrenzender
+// Raum übernimmt die Dicke vom Nachbarn.
+function syncSharedWalls(room) {
+  for (const side of SIDES) {
+    for (const o of state.rooms) {
+      if (o.id !== room.id && isAdjacent(o, OPPOSITE[side], room)) {
+        room.thickness[side] = o.thickness[OPPOSITE[side]];
+      }
+    }
+  }
+}
+
+// Ändert die Dicke einer Wand. Die Innenmaße bleiben gleich; direkt
+// angrenzende Räume werden um die Differenz verschoben.
+function setWallThickness(r, side, t) {
+  const old = r.thickness[side];
+  const delta = t - old;
+  if (!delta) return;
+  const [nx, ny] = OUTWARD[side];
+  for (const o of state.rooms) {
+    if (o.id === r.id || !isAdjacent(r, side, o, old)) continue;
+    moveRoom(o, o.x + nx * delta, o.y + ny * delta);
+    o.thickness[OPPOSITE[side]] = t;
+  }
+  r.thickness[side] = t;
 }
 
 // ---------- Prüfungen ----------
@@ -414,7 +483,7 @@ function render() {
       fill="${isSelected('room', r.id) ? '#eef4ff' : '#ffffff'}" />`).join('');
 
   const passages = gaps.filter((g) => g.kind === 'removed').map((g) => {
-    const b = bandRect(g.axis, g.c, g.a, g.b);
+    const b = gapRect(g);
     return `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="#ffffff" pointer-events="none" />`;
   }).join('');
 
@@ -431,12 +500,15 @@ function render() {
     const [x1, y1, x2, y2] = l.axis === 'h' ? [l.start, l.c, l.end, l.c] : [l.c, l.start, l.c, l.end];
     return `
       <g class="wall" data-kind="wall" data-id="${r.id}" data-side="${side}">
-        <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="transparent" stroke-width="${WALL * 1.5}" />
+        <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="transparent" stroke-width="${Math.max(l.t, WALL) * 1.5}" />
         <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#9aa5b1" stroke-width="1.5" stroke-dasharray="8 6" />
       </g>`;
   })).join('');
 
   const openings = state.openings.map(openingSvg).join('');
+  // Türschwenk nochmals über den Möbeln, damit er sichtbar bleibt (nicht anklickbar).
+  const doorSwings = state.openings.filter((o) => o.type === 'door')
+    .map((o) => `<g pointer-events="none" opacity="0.8">${doorSwingSvg(o)}</g>`).join('');
 
   svg.innerHTML = `
     <defs>
@@ -448,10 +520,11 @@ function render() {
     ${roomFills}
     ${passages}
     ${roomLabels}
-    ${furniture}
     ${walls}
     ${removedWalls}
     ${openings}
+    ${furniture}
+    ${doorSwings}
     ${selectionOverlay()}
     ${scaleBar(vb, font)}`;
 }
@@ -503,26 +576,41 @@ function backEdge(f, fp) {
 
 function openingSvg(o) {
   const { line, a, b } = openingSpan(o);
-  const gap = bandRect(line.axis, line.c, a, b);
+  const gap = bandRect(line.axis, line.c, a, b, line.t);
   const color = isSelected('opening', o.id) ? '#2f6fde' : '#3e4c59';
   const rect = `<rect x="${gap.x}" y="${gap.y}" width="${gap.w}" height="${gap.h}"`;
   let inner;
-  if (o.type === 'window') {
+  if (o.type === 'passage') {
+    // Wandöffnung ohne Tür: nur die Laibungen werden angedeutet.
+    const jamb = (s) => (line.axis === 'h'
+      ? `M ${s} ${gap.y} V ${gap.y + gap.h}`
+      : `M ${gap.x} ${s} H ${gap.x + gap.w}`);
+    const mid = line.axis === 'h' ? `M ${a} ${line.c} H ${b}` : `M ${line.c} ${a} V ${b}`;
+    inner = `
+      ${rect} fill="#ffffff" />
+      <path d="${jamb(a)} ${jamb(b)}" stroke="${color}" stroke-width="3" />
+      <path d="${mid}" stroke="${color}" stroke-width="1" stroke-dasharray="4 6" />`;
+  } else if (o.type === 'window') {
     const mid = line.axis === 'h' ? `M ${a} ${line.c} H ${b}` : `M ${line.c} ${a} V ${b}`;
     inner = `
       ${rect} fill="#dbeafe" stroke="${color}" stroke-width="2" />
       <path d="${mid}" stroke="${color}" stroke-width="1.5" />`;
   } else {
-    const { H, O, T, radius } = doorGeometry(o);
-    const cross = (T[0] - H[0]) * (O[1] - H[1]) - (T[1] - H[1]) * (O[0] - H[0]);
-    const sweep = cross > 0 ? 1 : 0;
-    inner = `
-      ${rect} fill="#ffffff" />
-      <path d="M ${T[0]} ${T[1]} A ${radius} ${radius} 0 0 ${sweep} ${O[0]} ${O[1]}"
-        fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="6 4" />
-      <line x1="${H[0]}" y1="${H[1]}" x2="${T[0]}" y2="${T[1]}" stroke="${color}" stroke-width="4" stroke-linecap="round" />`;
+    inner = `${rect} fill="#ffffff" />${doorSwingSvg(o)}`;
   }
   return `<g class="opening" data-kind="opening" data-id="${o.id}">${inner}</g>`;
+}
+
+// Türblatt (geöffnet) und Schwenkbogen.
+function doorSwingSvg(o) {
+  const { H, O, T, radius } = doorGeometry(o);
+  const color = isSelected('opening', o.id) ? '#2f6fde' : '#3e4c59';
+  const cross = (T[0] - H[0]) * (O[1] - H[1]) - (T[1] - H[1]) * (O[0] - H[0]);
+  const sweep = cross > 0 ? 1 : 0;
+  return `
+    <path d="M ${T[0]} ${T[1]} A ${radius} ${radius} 0 0 ${sweep} ${O[0]} ${O[1]}"
+      fill="none" stroke="${color}" stroke-width="1.5" stroke-dasharray="6 4" />
+    <line x1="${H[0]}" y1="${H[1]}" x2="${T[0]}" y2="${T[1]}" stroke="${color}" stroke-width="4" stroke-linecap="round" />`;
 }
 
 function selectionOverlay() {
@@ -530,7 +618,7 @@ function selectionOverlay() {
   const r = roomById(selected.id);
   if (!r) return '';
   const l = wallLine(r, selected.side);
-  const b = bandRect(l.axis, l.c, l.start, l.end);
+  const b = bandRect(l.axis, l.c, l.start, l.end, l.t);
   return `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="#2f6fde" fill-opacity="0.25"
     stroke="#2f6fde" stroke-width="3" pointer-events="none" />`;
 }
@@ -587,7 +675,7 @@ function roomPanel(r) {
   const walls = SIDES.map((side) => {
     const removed = r.removedWalls.includes(side);
     return `<button type="button" data-action="select-wall" data-side="${side}">
-      Wand ${SIDE_NAMES[side]} · ${wallLength(r, side)} cm${removed ? ' (entfernt)' : ''}</button>`;
+      Wand ${SIDE_NAMES[side]} · ${wallLength(r, side)} cm, ${r.thickness[side]} cm dick${removed ? ' (entfernt)' : ''}</button>`;
   }).join('');
   return `
     <p class="panel-title">Raum</p>
@@ -598,7 +686,7 @@ function roomPanel(r) {
       ${numField('x', 'Position X (cm)', r.x)}
       ${numField('y', 'Position Y (cm)', r.y)}
     </div>
-    <p class="hint">Wände bearbeiten (Türen, Fenster, entfernen):</p>
+    <p class="hint">Wände bearbeiten (Dicke, Türen, Fenster, Durchgänge, entfernen):</p>
     <div class="buttons stack">${walls}</div>
     <div class="buttons">
       <button type="button" data-action="delete" class="danger">Raum löschen</button>
@@ -611,18 +699,21 @@ function wallPanel(r) {
   const list = state.openings
     .filter((o) => o.roomId === r.id && o.side === side)
     .map((o) => `<button type="button" data-action="select-opening" data-id="${o.id}">
-      ${o.type === 'door' ? 'Tür' : 'Fenster'} · ${o.width} cm</button>`).join('');
+      ${OPENING_NAMES[o.type]} · ${o.width} cm</button>`).join('');
   return `
     <p class="panel-title">Wand ${SIDE_NAMES[side]} – ${esc(r.name)}</p>
     <div class="grid-form">
       ${numField('wall-length', 'Länge innen (cm)', wallLength(r, side), MIN_ROOM)}
+      ${numField('wall-thickness', 'Wanddicke (cm)', r.thickness[side], MIN_THICKNESS)}
     </div>
+    <p class="hint">Bei einer gemeinsamen Wand ändert sich die Dicke für beide Räume; der Nachbarraum rückt entsprechend.</p>
     <div class="buttons">
-      <button type="button" data-action="toggle-wall">${removed ? 'Wand wiederherstellen' : 'Wand entfernen'}</button>
       ${removed ? '' : '<button type="button" data-action="add-door">+ Tür</button>'}
       ${removed ? '' : '<button type="button" data-action="add-window">+ Fenster</button>'}
+      ${removed ? '' : '<button type="button" data-action="add-passage">+ Durchgang (ohne Tür)</button>'}
+      <button type="button" data-action="toggle-wall">${removed ? 'Wand wiederherstellen' : 'Ganze Wand entfernen'}</button>
     </div>
-    ${list ? `<p class="hint">Türen und Fenster in dieser Wand:</p><div class="buttons stack">${list}</div>` : ''}
+    ${list ? `<p class="hint">Öffnungen in dieser Wand:</p><div class="buttons stack">${list}</div>` : ''}
     <div class="buttons"><button type="button" data-action="select-room">← Zum Raum</button></div>`;
 }
 
@@ -635,13 +726,13 @@ function openingPanel(o) {
         : [['start', 'oben'], ['end', 'unten']])}
       ${selectField('swing', 'Öffnet', o.swing, [['in', `in den Raum „${esc(r.name)}“`], ['out', 'nach außen / in den Nachbarraum']])}` : '';
   return `
-    <p class="panel-title">${o.type === 'door' ? 'Tür' : 'Fenster'} in Wand ${SIDE_NAMES[o.side]} – ${esc(r.name)}</p>
+    <p class="panel-title">${OPENING_NAMES[o.type]} in Wand ${SIDE_NAMES[o.side]} – ${esc(r.name)}</p>
     <div class="grid-form">
       ${numField('width', 'Breite (cm)', o.width, MIN_OPENING)}
       ${numField('offset', `Abstand von ${horizontal ? 'links' : 'oben'} (cm)`, o.offset, 0)}
       ${doorFields}
     </div>
-    <p class="hint">Tipp: ${o.type === 'door' ? 'Die Tür' : 'Das Fenster'} lässt sich auch mit der Maus entlang der Wand ziehen.</p>
+    <p class="hint">Tipp: Die Öffnung lässt sich auch mit der Maus entlang der Wand ziehen.</p>
     <div class="buttons">
       <button type="button" data-action="select-wall" data-side="${o.side}" data-room="${o.roomId}">← Zur Wand</button>
       <button type="button" data-action="delete" class="danger">Löschen</button>
@@ -673,6 +764,7 @@ function refreshFields() {
     if (document.activeElement === input) continue;
     const field = input.dataset.field;
     if (field === 'wall-length') input.value = wallLength(item, selected.side);
+    else if (field === 'wall-thickness') input.value = item.thickness[selected.side];
     else if (field in item) input.value = item[field];
   }
 }
@@ -691,15 +783,16 @@ function commit() {
   render();
 }
 
-function addRoom(name, width, length) {
+function addRoom(name, width, length, thickness) {
   let x = 0;
   let y = 0;
   if (state.rooms.length) {
     const rightmost = state.rooms.reduce((a, b) => (a.x + a.width >= b.x + b.width ? a : b));
-    x = rightmost.x + rightmost.width + WALL;
+    x = rightmost.x + rightmost.width + rightmost.thickness.right;
     y = rightmost.y;
   }
-  const room = { id: uid(), name, x, y, width, length, removedWalls: [] };
+  const room = { id: uid(), name, x, y, width, length, removedWalls: [], thickness: uniformThickness(thickness) };
+  syncSharedWalls(room);
   state.rooms.push(room);
   resolveAllFurniture();
   save();
@@ -731,7 +824,7 @@ function addOpening(type) {
   const r = findItem(selected);
   const side = selected.side;
   const len = wallLength(r, side);
-  const width = Math.min(type === 'door' ? 90 : 120, len);
+  const width = Math.min(OPENING_DEFAULT_WIDTH[type], len);
   const o = {
     id: uid(),
     type,
@@ -757,7 +850,7 @@ function toggleWall() {
     resolveAllFurniture();
   } else {
     r.removedWalls.push(side);
-    // Türen und Fenster einer entfernten Wand entfallen.
+    // Öffnungen einer entfernten Wand entfallen.
     state.openings = state.openings.filter((o) => !(o.roomId === r.id && o.side === side));
   }
   save();
@@ -848,9 +941,13 @@ function applyField(field, raw) {
   if (raw === '' || !Number.isFinite(value)) return;
 
   if (selected.kind === 'room' || selected.kind === 'wall') {
-    if (field === 'x') moveRoom(item, value, item.y);
-    else if (field === 'y') moveRoom(item, item.x, value);
-    else {
+    if (field === 'x' || field === 'y') {
+      moveRoom(item, field === 'x' ? value : item.x, field === 'y' ? value : item.y);
+      syncSharedWalls(item);
+    } else if (field === 'wall-thickness') {
+      if (value < MIN_THICKNESS || value > MAX_THICKNESS) return;
+      setWallThickness(item, selected.side, value);
+    } else {
       if (value < MIN_ROOM) return;
       const key = field === 'wall-length'
         ? (selected.side === 'top' || selected.side === 'bottom' ? 'width' : 'length')
@@ -937,10 +1034,11 @@ svg.addEventListener('pointermove', (e) => {
 
 function endDrag() {
   if (!drag) return;
-  const moved = drag.moved;
+  const { moved, kind, item } = drag;
   drag = null;
   svg.classList.remove('dragging');
   if (moved) {
+    if (kind === 'room') syncSharedWalls(item);
     resolveAllFurniture();
     commit();
   }
@@ -953,7 +1051,10 @@ document.getElementById('room-form').addEventListener('submit', (e) => {
   const data = new FormData(e.target);
   const width = Number(data.get('width'));
   const length = Number(data.get('length'));
-  if (width >= MIN_ROOM && length >= MIN_ROOM) addRoom(String(data.get('name')).trim() || 'Zimmer', width, length);
+  const thickness = Number(data.get('thickness'));
+  if (width >= MIN_ROOM && length >= MIN_ROOM && thickness >= MIN_THICKNESS && thickness <= MAX_THICKNESS) {
+    addRoom(String(data.get('name')).trim() || 'Zimmer', width, length, thickness);
+  }
 });
 
 selectionEl.addEventListener('input', (e) => {
@@ -971,6 +1072,7 @@ selectionEl.addEventListener('click', (e) => {
   else if (action === 'toggle-wall') toggleWall();
   else if (action === 'add-door') addOpening('door');
   else if (action === 'add-window') addOpening('window');
+  else if (action === 'add-passage') addOpening('passage');
   else if (action === 'select-room') select({ kind: 'room', id: selected.id });
   else if (action === 'select-opening') select({ kind: 'opening', id: btn.dataset.id });
   else if (action === 'select-wall') {

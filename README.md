@@ -12,7 +12,7 @@ Keine Installation nötig: Öffne einfach `index.html` im Browser (Doppelklick).
 
 - **Räume** mit Name, Breite und Länge (Innenmaße in cm) anlegen und jederzeit bearbeiten. Neue Räume werden direkt angrenzend platziert. Beim Verschieben rasten sie an Nachbarräume an, sodass genau eine Wand dazwischen liegt. Die Möbel im Raum wandern mit.
 - **Wandmaße** stehen an jeder Wand im Raum.
-- **Wände** anklicken, um sie zu entfernen (z. B. für offene Küchen) oder **Türen** und **Fenster** einzusetzen. Türen haben eine einstellbare Breite, Türangel (links/rechts) und Öffnungsrichtung; der Schwenkbereich wird als Bogen angezeigt. Türen und Fenster lassen sich mit der Maus entlang der Wand verschieben.
+- **Wände** anklicken, um ihre **Dicke** einzustellen, sie ganz zu entfernen (z. B. für offene Küchen) oder **Türen**, **Fenster** und **Durchgänge** (Wandöffnung ohne Tür) einzusetzen. Bei einer gemeinsamen Wand gilt die Dicke für beide Räume; der Nachbarraum rückt entsprechend, die Innenmaße bleiben gleich. Türen haben eine einstellbare Breite, Türangel (links/rechts) und Öffnungsrichtung; der Schwenkbereich wird als Bogen angezeigt. Türen und Fenster lassen sich mit der Maus entlang der Wand verschieben.
 - **Möbel können nicht in Wände** oder Fenster geschoben werden. Sie werden automatisch herausgeschoben und rasten bündig an Wänden ein.
 - **Möbel-Bibliothek** (Bett, Sofa, Tisch, Schrank, …). Jedes Möbelstück lässt sich umbenennen und in den Maßen anpassen.
 - **Verschieben** per Drag & Drop oder mit den Pfeiltasten, **Drehen** um 90° mit der Taste `R`. Die dunkle Linie markiert die Rückseite, z. B. das Kopfende des Betts.
