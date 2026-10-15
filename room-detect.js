@@ -5,7 +5,10 @@
 // Startpunkt aus wächst, bis jede Seite überwiegend auf Wand trifft. Türöffnungen
 // sind kürzer als die halbe Wand und halten das Wachstum daher nicht auf.
 
-const DETECT_STOP = 0.5; // Anteil Wandpixel, ab dem eine Kante als Wand gilt
+// Anteil Wandpixel, ab dem eine Kante als Wand gilt. Unter der Hälfte, damit auch
+// Wände zählen, die nur einen Teil des Raums begrenzen (L-förmige Räume);
+// Wände mit Türöffnung liegen trotzdem deutlich darüber.
+const DETECT_STOP = 0.35;
 
 function otsuThreshold(hist, total) {
   let sum = 0;
@@ -73,6 +76,54 @@ function morph(mask, w, h, r, erode) {
   return pass(pass(mask, true), false);
 }
 
+// Größte häufige Länge dunkler Abschnitte ≈ Dicke der dicksten Wände (Außenwände).
+function estimateMaxWallThickness(mask, w, h) {
+  const counts = new Uint32Array(81);
+  const scan = (len, get) => {
+    let run = 0;
+    for (let i = 0; i <= len; i++) {
+      if (i < len && get(i)) run++;
+      else {
+        if (run >= 3 && run <= 80) counts[run]++;
+        run = 0;
+      }
+    }
+  };
+  for (let y = 0; y < h; y++) scan(w, (x) => mask[y * w + x]);
+  for (let x = 0; x < w; x++) scan(h, (y) => mask[y * w + x]);
+  const max = Math.max(...counts);
+  let thick = 3;
+  for (let i = 3; i <= 80; i++) if (counts[i] >= max * 0.05) thick = i;
+  return thick;
+}
+
+// Fenster und Türen sind Lücken in einer Wand. Liegen zwei lange Wandstücke auf
+// derselben Zeile (bzw. Spalte) und ist die Lücke dazwischen nicht zu groß, wird sie
+// für die Erkennung geschlossen. "Lang" heißt: deutlich länger als jede Wanddicke,
+// damit quer verlaufende Wände nicht miteinander verbunden werden.
+function bridgeWallGaps(mask, w, h, minRun, maxGap) {
+  const out = mask.slice();
+  const bridge = (lines, len, idx) => {
+    for (let l = 0; l < lines; l++) {
+      let prevEnd = -1; // Ende des letzten langen Abschnitts
+      let i = 0;
+      while (i < len) {
+        if (!mask[idx(l, i)]) { i++; continue; }
+        const start = i;
+        while (i < len && mask[idx(l, i)]) i++;
+        if (i - start < minRun) continue;
+        if (prevEnd >= 0 && start - prevEnd <= maxGap) {
+          for (let k = prevEnd; k < start; k++) out[idx(l, k)] = 1;
+        }
+        prevEnd = i;
+      }
+    }
+  };
+  bridge(h, w, (y, x) => y * w + x);
+  bridge(w, h, (x, y) => y * w + x);
+  return out;
+}
+
 function analyzePlanImage(imageData) {
   const { width: w, height: h, data } = imageData;
   const lum = new Uint8Array(w * h);
@@ -91,7 +142,11 @@ function analyzePlanImage(imageData) {
   // (die geschätzte Dicke entspricht oft eher den dicken Außenwänden).
   const wallPx = estimateWallThickness(raw, w, h);
   const r = wallPx >= 10 ? 2 : 1;
-  const mask = morph(morph(raw, w, h, r, true), w, h, r, false);
+  const opened = morph(morph(raw, w, h, r, true), w, h, r, false);
+  const thick = estimateMaxWallThickness(opened, w, h);
+  const minRun = Math.round(thick * 1.5) + 2;
+  const maxGap = Math.max(60, Math.round(Math.min(w, h) * 0.15));
+  const mask = bridgeWallGaps(opened, w, h, minRun, maxGap);
 
   // Präfixsummen für schnelle Abfragen "Anteil Wand auf dieser Zeile/Spalte".
   const rowSum = new Int32Array((w + 1) * h);
@@ -192,7 +247,7 @@ function measureWallPx(a, rect, side) {
 }
 
 function minRoomPx(a) {
-  return Math.max(a.wallPx * 3, Math.round(Math.min(a.w, a.h) * 0.04));
+  return Math.max(a.wallPx * 3, Math.round(Math.min(a.w, a.h) * 0.025));
 }
 
 function rectOverlap(a, b) {
@@ -217,31 +272,45 @@ function trimAgainst(b, a, gap) {
 }
 
 // Sucht alle Räume: Startpunkte im Raster, jeder bekommt ein wachsendes Rechteck.
+// Große Rechtecke werden zuerst übernommen; kleinere werden daran zugeschnitten
+// (so wird z. B. ein L-förmiger Raum zu zwei Rechtecken).
 function detectAllRooms(a) {
   const minPx = minRoomPx(a);
-  const step = Math.max(4, Math.round(Math.min(a.w, a.h) / 50));
-  const rooms = [];
-  const skip = [];
+  const step = Math.max(4, Math.round(Math.min(a.w, a.h) / 60));
+  const candidates = [];
+  const key = (r) => `${r.x},${r.y},${r.w},${r.h}`;
+  const seen = new Set();
   for (let y = step; y < a.h; y += step) {
     for (let x = step; x < a.w; x += step) {
       if (a.mask[y * a.w + x]) continue;
-      if (rooms.some((r) => insideRect(r, x, y)) || skip.some((r) => insideRect(r, x, y))) continue;
+      if (candidates.some((r) => insideRect(r, x, y))) continue;
       const found = detectRoomAt(a, x, y);
-      if (!found) continue;
-      if (found.outside) {
-        skip.push(found.rect);
-        continue;
-      }
-      let rect = found.rect;
-      for (const other of rooms) {
-        if (rect && rectOverlap(rect, other)) rect = trimAgainst(rect, other, a.wallPx);
-      }
-      if (!rect || rect.w < minPx || rect.h < minPx) {
-        skip.push(found.rect);
-        continue;
-      }
-      rooms.push(rect);
+      // Außenbereiche verwerfen (reichen bis zum Bildrand).
+      if (!found || found.outside || found.rect.w < minPx || found.rect.h < minPx) continue;
+      if (seen.has(key(found.rect))) continue;
+      seen.add(key(found.rect));
+      candidates.push(found.rect);
     }
   }
+  candidates.sort((p, q) => q.w * q.h - p.w * p.h);
+  const rooms = [];
+  for (let rect of candidates) {
+    for (const other of rooms) {
+      if (rect && rectOverlap(rect, other)) rect = trimAgainst(rect, other, a.wallPx);
+    }
+    if (rect && rect.w >= minPx && rect.h >= minPx) rooms.push(rect);
+  }
   return rooms;
+}
+
+// Anteil Wandpixel in einem Rechteck (px, Grenzen inklusive).
+function rectWallFraction(a, x0, y0, x1, y1) {
+  x0 = clamp(Math.round(x0), 0, a.w - 1);
+  x1 = clamp(Math.round(x1), 0, a.w - 1);
+  y0 = clamp(Math.round(y0), 0, a.h - 1);
+  y1 = clamp(Math.round(y1), 0, a.h - 1);
+  if (x1 < x0 || y1 < y0) return 1;
+  let sum = 0;
+  for (let y = y0; y <= y1; y++) sum += a.rowSum[y * (a.w + 1) + x1 + 1] - a.rowSum[y * (a.w + 1) + x0];
+  return sum / ((x1 - x0 + 1) * (y1 - y0 + 1));
 }

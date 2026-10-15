@@ -339,6 +339,33 @@ function joinNeighbours(room) {
   }
 }
 
+// Stoßen zwei erkannte Räume aneinander, ohne dass im Bild eine Wand dazwischen ist
+// (z. B. die zwei Teile eines L-förmigen Raums), wird dort ein Durchgang eingesetzt.
+function addOpenConnections(analysis) {
+  const bg = state.background;
+  const toPx = (v, origin) => (v - origin) / bg.scale;
+  for (const r of state.rooms) {
+    for (const o of state.rooms) {
+      if (o === r) continue;
+      let span;
+      let band;
+      if (o.x > r.x + r.width - 1 && isAdjacent(r, 'right', o)) {
+        span = [Math.max(r.y, o.y), Math.min(r.y + r.length, o.y + o.length)];
+        band = [r.x + r.width, span[0], o.x, span[1]];
+        if (span[1] - span[0] < MIN_OPENING) continue;
+        if (rectWallFraction(analysis, toPx(band[0], bg.x), toPx(band[1], bg.y), toPx(band[2], bg.x), toPx(band[3], bg.y)) > 0.3) continue;
+        state.openings.push({ id: uid(), type: 'passage', roomId: r.id, side: 'right', offset: span[0] - r.y, width: span[1] - span[0], hinge: 'start', swing: 'in' });
+      } else if (o.y > r.y + r.length - 1 && isAdjacent(r, 'bottom', o)) {
+        span = [Math.max(r.x, o.x), Math.min(r.x + r.width, o.x + o.width)];
+        band = [span[0], r.y + r.length, span[1], o.y];
+        if (span[1] - span[0] < MIN_OPENING) continue;
+        if (rectWallFraction(analysis, toPx(band[0], bg.x), toPx(band[1], bg.y), toPx(band[2], bg.x), toPx(band[3], bg.y)) > 0.3) continue;
+        state.openings.push({ id: uid(), type: 'passage', roomId: r.id, side: 'bottom', offset: span[0] - r.x, width: span[1] - span[0], hinge: 'start', swing: 'in' });
+      }
+    }
+  }
+}
+
 async function wandClick(p) {
   const bg = state.background;
   const analysis = await getAnalysis();
@@ -386,6 +413,7 @@ async function autoFindRooms() {
   const ordered = [...rects].sort((a, b) => (a.y - b.y) || (a.x - b.x));
   ordered.forEach((r, i) => state.rooms.push(roomFromPxRect(r, analysis, `Raum ${i + 1}`)));
   state.rooms.forEach(joinNeighbours);
+  addOpenConnections(analysis);
   state.background.visible = true;
   resolveAllFurniture();
   save();
