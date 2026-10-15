@@ -42,6 +42,7 @@ let state = load() || defaultState();
 let selected = null; // { kind: 'room' | 'furniture' | 'wall' | 'opening', id, side? }
 let drag = null;
 let viewBox = null;
+let planMode = null; // Zeichen-/Kalibriermodus, gesteuert von plan-import.js
 
 // ---------- Zustand ----------
 
@@ -53,6 +54,7 @@ function defaultState() {
     }],
     furniture: [],
     openings: [],
+    background: null, // Grundrissbild: { dataUrl, width, height (px), scale (cm/px), x, y, opacity, visible }
   };
 }
 
@@ -78,6 +80,10 @@ function normalize(data) {
     if (![0, 90, 180, 270].includes(f.rotation)) f.rotation = 0;
   }
   data.openings = data.openings.filter((o) => data.rooms.some((r) => r.id === o.roomId));
+  const bg = data.background;
+  const bgValid = bg && typeof bg.dataUrl === 'string' && bg.dataUrl.startsWith('data:image/')
+    && bg.width > 0 && bg.height > 0 && bg.scale > 0;
+  data.background = bgValid ? bg : null;
   return data;
 }
 
@@ -89,11 +95,19 @@ function load() {
   }
 }
 
+let saveWarningShown = false;
+
 function save() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
-    // Speichern nicht möglich (z. B. privater Modus) – Planung bleibt nur im Speicher.
+    // Speichern nicht möglich (privater Modus oder Speicher voll, z. B. durch ein großes
+    // Grundrissbild) – Planung bleibt bis zum Neuladen erhalten.
+    if (!saveWarningShown) {
+      saveWarningShown = true;
+      alert('Die Planung konnte nicht im Browser gespeichert werden (Speicher voll?). '
+        + 'Nutze „Exportieren“, um sie als Datei zu sichern.');
+    }
   }
 }
 
@@ -457,8 +471,14 @@ function esc(text) {
   })[c]);
 }
 
+function backgroundRect() {
+  const bg = state.background;
+  return bg ? { x: bg.x, y: bg.y, w: bg.width * bg.scale, h: bg.height * bg.scale } : null;
+}
+
 function computeViewBox() {
   const rects = [...state.rooms.map(roomRect), ...state.furniture.map(footprint)];
+  if (state.background && state.background.visible) rects.push(backgroundRect());
   if (rects.length === 0) return { x: -MARGIN, y: -MARGIN, w: 600, h: 500 };
   const minX = Math.min(...rects.map((r) => r.x)) - MARGIN;
   const minY = Math.min(...rects.map((r) => r.y)) - MARGIN;
@@ -469,22 +489,26 @@ function computeViewBox() {
 
 function render() {
   // Während des Ziehens bleibt der Ausschnitt stehen, damit nichts springt.
-  if (!drag || !viewBox) viewBox = computeViewBox();
+  if ((!drag && !planMode) || !viewBox) viewBox = computeViewBox();
   const vb = viewBox;
   const font = Math.max(10, Math.min(vb.w, vb.h) / 50);
   const status = furnitureStatus();
   const gaps = wallGaps();
   const pieces = wallPieces(gaps);
+  // Mit sichtbarem Grundrissbild werden Räume durchscheinend, damit man nachzeichnen kann.
+  const showBg = !!(state.background && state.background.visible);
+  const roomOpacity = showBg ? 0.55 : 1;
 
   svg.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+  renderBackground(vb);
 
   const roomFills = state.rooms.map((r) => `
     <rect class="room" data-kind="room" data-id="${r.id}" x="${r.x}" y="${r.y}" width="${r.width}" height="${r.length}"
-      fill="${isSelected('room', r.id) ? '#eef4ff' : '#ffffff'}" />`).join('');
+      fill="${isSelected('room', r.id) ? '#eef4ff' : '#ffffff'}" fill-opacity="${roomOpacity}" />`).join('');
 
   const passages = gaps.filter((g) => g.kind === 'removed').map((g) => {
     const b = gapRect(g);
-    return `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="#ffffff" pointer-events="none" />`;
+    return `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="#ffffff" fill-opacity="${roomOpacity}" pointer-events="none" />`;
   }).join('');
 
   const roomLabels = state.rooms.map((r) => roomLabelSvg(r, font)).join('');
@@ -510,13 +534,7 @@ function render() {
   const doorSwings = state.openings.filter((o) => o.type === 'door')
     .map((o) => `<g pointer-events="none" opacity="0.8">${doorSwingSvg(o)}</g>`).join('');
 
-  svg.innerHTML = `
-    <defs>
-      <pattern id="grid" width="${GRID}" height="${GRID}" patternUnits="userSpaceOnUse">
-        <path d="M ${GRID} 0 L 0 0 0 ${GRID}" fill="none" stroke="#dfe3e8" stroke-width="1" />
-      </pattern>
-    </defs>
-    <rect x="${vb.x}" y="${vb.y}" width="${vb.w}" height="${vb.h}" fill="url(#grid)" />
+  contentLayer.innerHTML = `
     ${roomFills}
     ${passages}
     ${roomLabels}
@@ -526,7 +544,40 @@ function render() {
     ${furniture}
     ${doorSwings}
     ${selectionOverlay()}
+    ${typeof planModeOverlay === 'function' ? planModeOverlay(font) : ''}
     ${scaleBar(vb, font)}`;
+}
+
+// Raster und Grundrissbild liegen in eigenen Ebenen, damit das (große) Bild
+// nicht bei jedem Neuzeichnen neu eingefügt werden muss.
+svg.innerHTML = `
+  <defs>
+    <pattern id="grid" width="${GRID}" height="${GRID}" patternUnits="userSpaceOnUse">
+      <path d="M ${GRID} 0 L 0 0 0 ${GRID}" fill="none" stroke="#dfe3e8" stroke-width="1" />
+    </pattern>
+  </defs>
+  <rect id="grid-layer" fill="url(#grid)" />
+  <image id="bg-layer" preserveAspectRatio="none" pointer-events="none" />
+  <g id="content-layer"></g>`;
+const gridLayer = svg.querySelector('#grid-layer');
+const bgLayer = svg.querySelector('#bg-layer');
+const contentLayer = svg.querySelector('#content-layer');
+let bgLayerSrc = null;
+
+function renderBackground(vb) {
+  for (const [k, v] of Object.entries({ x: vb.x, y: vb.y, width: vb.w, height: vb.h })) gridLayer.setAttribute(k, v);
+  const bg = state.background;
+  if (!bg || !bg.visible) {
+    bgLayer.setAttribute('display', 'none');
+    return;
+  }
+  if (bgLayerSrc !== bg.dataUrl) {
+    bgLayer.setAttribute('href', bg.dataUrl);
+    bgLayerSrc = bg.dataUrl;
+  }
+  const r = backgroundRect();
+  bgLayer.removeAttribute('display');
+  for (const [k, v] of Object.entries({ x: r.x, y: r.y, width: r.w, height: r.h, opacity: bg.opacity })) bgLayer.setAttribute(k, v);
 }
 
 function roomLabelSvg(r, font) {
@@ -1115,9 +1166,7 @@ importFile.addEventListener('change', async () => {
   try {
     const data = normalize(JSON.parse(await file.text()));
     if (!data) throw new Error('ungültig');
-    state = data;
-    save();
-    select(null);
+    replaceState(data);
   } catch {
     alert('Die Datei konnte nicht gelesen werden. Ist es eine exportierte Planung?');
   }
@@ -1125,10 +1174,16 @@ importFile.addEventListener('change', async () => {
 
 document.getElementById('reset').addEventListener('click', () => {
   if (!confirm('Gesamte Planung löschen und neu beginnen?')) return;
-  state = defaultState();
+  replaceState(defaultState());
+});
+
+function replaceState(next) {
+  state = next;
+  planMode = null;
   save();
   select(null);
-});
+  if (typeof updateImportPanel === 'function') updateImportPanel();
+}
 
 resolveAllFurniture();
 renderCatalog();

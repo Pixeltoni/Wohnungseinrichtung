@@ -19,6 +19,17 @@ Keine Installation nötig: Öffne einfach `index.html` im Browser (Doppelklick).
 - **Prüfungen:** Möbel, die sich überschneiden oder im Schwenkbereich einer Tür stehen, werden rot umrandet. Möbel außerhalb eines Raums werden orange gestrichelt umrandet.
 - **Speichern:** Die Planung wird automatisch im Browser gespeichert und kann als JSON-Datei exportiert und wieder importiert werden.
 
+## Grundriss importieren
+
+Unter **„Grundriss importieren“** ein Bild des Grundrisses hochladen (JPG/PNG; bei PDFs einen Screenshot). Es liegt dann als Hintergrund im Plan.
+
+- **Automatisch erkennen (KI):** Claude liest Räume, Maße, Türen und Fenster aus dem Bild und legt daraus Räume an. Dafür ist ein eigener API-Schlüssel von [console.anthropic.com](https://console.anthropic.com/) nötig. Der Schlüssel wird nur im eigenen Browser gespeichert, und das Bild geht direkt vom Browser an die Anthropic-API. Funktioniert nur über die veröffentlichte Webseite, nicht beim direkten Öffnen der Datei.
+- **Von Hand:** Zuerst **„Maßstab festlegen“**: zwei Punkte einer Strecke mit bekannter Länge anklicken und die echte Länge eingeben. Dann **„Räume nachzeichnen“**: Rechtecke entlang der Innenkanten der Räume ziehen.
+
+Danach sind alle Räume ganz normal bearbeitbar (Maße, Wände, Türen, Fenster).
+
+Das Anthropic-SDK liegt gebündelt unter `vendor/anthropic-sdk.mjs` (Version 0.129.0, MIT-Lizenz).
+
 ## Tastatur
 
 | Taste | Aktion |

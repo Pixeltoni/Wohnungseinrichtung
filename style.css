@@ -47,6 +47,32 @@ button:hover { background: #eceff3; }
 button[type="submit"] { background: #2f6fde; border-color: #2f6fde; color: #fff; }
 button[type="submit"]:hover { background: #255bb8; }
 button.danger { color: #b42318; }
+button.primary { background: #2f6fde; border-color: #2f6fde; color: #fff; }
+button.primary:hover { background: #255bb8; }
+button.active { background: #2f6fde; border-color: #2f6fde; color: #fff; }
+button:disabled { opacity: 0.5; cursor: default; }
+
+details.ai { margin: 8px 0; padding: 8px; border: 1px solid #dde1e6; border-radius: 6px; }
+details.ai summary { cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+.status { min-height: 1em; }
+.status.error { color: #b42318; }
+input[type="range"] { width: 100%; }
+input[type="password"] { padding: 6px 8px; border: 1px solid #c8ced5; border-radius: 6px; font: inherit; }
+
+.mode-hint {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: #1f2933;
+  color: #fff;
+  font-size: 0.85rem;
+  pointer-events: none;
+}
+#plan.drawing, #plan.drawing * { cursor: crosshair; }
 
 .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .buttons.stack { flex-direction: column; }
