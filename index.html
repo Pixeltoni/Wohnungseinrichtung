@@ -30,8 +30,13 @@
       <input id="plan-file" type="file" accept="image/*" hidden>
       <div id="plan-tools" hidden>
         <p class="hint" id="plan-scale"></p>
+        <p class="hint">Automatisch, kostenlos (am besten bei dunklen Wänden auf hellem Grund):</p>
+        <div class="buttons">
+          <button type="button" id="plan-autofind" class="primary">Räume automatisch finden</button>
+          <button type="button" id="plan-wand">Zauberstab: in Raum klicken</button>
+        </div>
         <details class="ai">
-          <summary>Automatisch erkennen (KI)</summary>
+          <summary>Mit KI erkennen (inkl. Namen, Türen, Fenster)</summary>
           <p class="hint">
             Claude liest Räume, Maße, Türen und Fenster aus dem Bild. Dafür brauchst du einen eigenen
             API-Schlüssel von <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a>.
@@ -96,6 +101,7 @@
   </main>
 
   <script src="app.js"></script>
+  <script src="room-detect.js"></script>
   <script src="plan-import.js"></script>
 </body>
 </html>

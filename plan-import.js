@@ -15,6 +15,8 @@ const importEls = {
   tools: document.getElementById('plan-tools'),
   calibrate: document.getElementById('plan-calibrate'),
   trace: document.getElementById('plan-trace'),
+  autofind: document.getElementById('plan-autofind'),
+  wand: document.getElementById('plan-wand'),
   opacity: document.getElementById('plan-opacity'),
   toggle: document.getElementById('plan-toggle'),
   remove: document.getElementById('plan-remove'),
@@ -97,6 +99,7 @@ function updateImportPanel() {
     + ` (1 Pixel = ${bg.scale.toFixed(2)} cm)`;
   importEls.calibrate.classList.toggle('active', planMode?.type === 'calibrate');
   importEls.trace.classList.toggle('active', planMode?.type === 'trace');
+  importEls.wand.classList.toggle('active', planMode?.type === 'wand');
 }
 
 function setStatus(text, isError = false) {
@@ -110,6 +113,7 @@ const MODE_HINTS = {
   calibrate: 'Maßstab: Klicke auf den Anfang einer Strecke mit bekannter Länge (z. B. eine bemaßte Wand).',
   calibrate2: 'Maßstab: Klicke jetzt auf das Ende der Strecke.',
   trace: 'Nachzeichnen: Ziehe ein Rechteck entlang der Innenkanten eines Raums. Esc beendet.',
+  wand: 'Zauberstab: Klicke in einen Raum auf dem Bild, er wird automatisch erkannt. Esc beendet.',
 };
 
 function setPlanMode(type) {
@@ -123,7 +127,12 @@ function setPlanMode(type) {
 }
 
 function planModeOverlay(font) {
-  if (!planMode) return '';
+  if (detectHighlight) {
+    const h = detectHighlight;
+    return `<rect x="${h.x}" y="${h.y}" width="${h.w}" height="${h.h}" fill="#2f6fde" fill-opacity="0.2"
+      stroke="#2f6fde" stroke-width="4" pointer-events="none" />`;
+  }
+  if (!planMode || planMode.type === 'wand') return '';
   const style = 'stroke="#d92d20" stroke-width="3" pointer-events="none"';
   if (planMode.type === 'calibrate') {
     const [a, b] = [planMode.points[0], planMode.preview];
@@ -160,6 +169,7 @@ function finishCalibration(a, b) {
   }
   // Bild um seine linke obere Ecke skalieren.
   state.background.scale *= real / measured;
+  state.background.calibrated = true;
   save();
   updateImportPanel();
   render();
@@ -197,6 +207,10 @@ svg.addEventListener('pointerdown', (e) => {
   e.stopImmediatePropagation();
   e.preventDefault();
   const p = toSvgPoint(e);
+  if (planMode.type === 'wand') {
+    wandClick(p);
+    return;
+  }
   if (planMode.type === 'calibrate') {
     if (!planMode.points.length) {
       planMode.points.push(p);
@@ -236,6 +250,151 @@ document.addEventListener('keydown', (e) => {
     setPlanMode(null);
   }
 }, true);
+
+// ---------- Erkennung ohne KI (room-detect.js) ----------
+
+let detectHighlight = null; // Rechteck in cm, das beim Nachfragen markiert wird
+let analysisCache = null;
+
+async function getAnalysis() {
+  const bg = state.background;
+  if (analysisCache && analysisCache.src === bg.dataUrl) return analysisCache.result;
+  const img = await loadImage(bg.dataUrl);
+  const canvas = document.createElement('canvas');
+  canvas.width = bg.width;
+  canvas.height = bg.height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, bg.width, bg.height);
+  const result = analyzePlanImage(ctx.getImageData(0, 0, bg.width, bg.height));
+  analysisCache = { src: bg.dataUrl, result };
+  return result;
+}
+
+function pxRectToCm(r) {
+  const bg = state.background;
+  return { x: bg.x + r.x * bg.scale, y: bg.y + r.y * bg.scale, w: r.w * bg.scale, h: r.h * bg.scale };
+}
+
+// Ohne festgelegten Maßstab: nach der echten Breite eines erkannten Raums fragen.
+async function ensureScale(pxRect) {
+  const bg = state.background;
+  if (bg.calibrated) return true;
+  detectHighlight = pxRectToCm(pxRect);
+  render();
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  const answer = prompt('Der Maßstab ist noch nicht festgelegt.\n'
+    + 'Wie breit ist der blau markierte Raum in Wirklichkeit (waagrecht, Innenmaß in cm)?');
+  detectHighlight = null;
+  const real = Number(String(answer ?? '').replace(',', '.'));
+  if (!(real > 0)) {
+    render();
+    return false;
+  }
+  bg.scale = real / pxRect.w;
+  bg.calibrated = true;
+  updateImportPanel();
+  return true;
+}
+
+// Position und Wanddicken kommen direkt aus dem Bild (pro Seite gemessen).
+function roomFromPxRect(r, analysis, name) {
+  const c = pxRectToCm(r);
+  const thickness = {};
+  for (const side of SIDES) {
+    thickness[side] = clamp(Math.round(measureWallPx(analysis, r, side) * state.background.scale), 5, 60);
+  }
+  return {
+    id: uid(),
+    name,
+    x: snap(c.x),
+    y: snap(c.y),
+    width: Math.max(MIN_ROOM, snap(c.w)),
+    length: Math.max(MIN_ROOM, snap(c.h)),
+    removedWalls: [],
+    thickness,
+  };
+}
+
+// Benachbarte Räume teilen sich genau eine Wand: Ihr Abstand wird zur Wanddicke
+// beider Seiten (gleicht Rundungen beim Umrechnen aus).
+const MAX_SHARED_WALL = 60;
+
+function joinNeighbours(room) {
+  for (const o of state.rooms) {
+    if (o.id === room.id) continue;
+    const hOverlap = o.x < room.x + room.width && room.x < o.x + o.width;
+    const vOverlap = o.y < room.y + room.length && room.y < o.y + o.length;
+    const pairs = [
+      [vOverlap, o.x - (room.x + room.width), 'right'],
+      [vOverlap, room.x - (o.x + o.width), 'left'],
+      [hOverlap, o.y - (room.y + room.length), 'bottom'],
+      [hOverlap, room.y - (o.y + o.length), 'top'],
+    ];
+    for (const [overlap, gap, side] of pairs) {
+      if (overlap && gap > 0 && gap <= MAX_SHARED_WALL) {
+        room.thickness[side] = gap;
+        o.thickness[OPPOSITE[side]] = gap;
+      }
+    }
+  }
+}
+
+async function wandClick(p) {
+  const bg = state.background;
+  const analysis = await getAnalysis();
+  const found = detectRoomAt(analysis, (p.x - bg.x) / bg.scale, (p.y - bg.y) / bg.scale);
+  if (!found) {
+    setStatus('Dort ist eine Wand oder außerhalb des Bilds – bitte mitten in einen Raum klicken.', true);
+    return;
+  }
+  if (found.outside) {
+    setStatus('Hier wurde kein geschlossener Raum gefunden (reicht bis zum Bildrand).', true);
+    return;
+  }
+  if (!(await ensureScale(found.rect))) return;
+  const room = roomFromPxRect(found.rect, analysis, `Raum ${state.rooms.length + 1}`);
+  state.rooms.push(room);
+  joinNeighbours(room);
+  resolveAllFurniture();
+  save();
+  selected = { kind: 'room', id: room.id };
+  renderSelection();
+  render();
+  setStatus(`„${room.name}“ erkannt: ${room.width} × ${room.length} cm. Name und Maße kannst du links anpassen.`);
+}
+
+async function autoFindRooms() {
+  if (!state.background) return;
+  const hasRooms = state.rooms.length > 0;
+  if (hasRooms && !confirm('Die gefundenen Räume ersetzen die aktuellen Räume, Türen und Fenster. Möbel bleiben erhalten. Fortfahren?')) return;
+  setPlanMode(null);
+  setStatus('Suche Räume …');
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const analysis = await getAnalysis();
+  const rects = detectAllRooms(analysis);
+  if (!rects.length) {
+    setStatus('Keine Räume gefunden. Klappt am besten mit dunklen Wänden auf hellem Grund – sonst den Zauberstab oder das Nachzeichnen nutzen.', true);
+    return;
+  }
+  const largest = rects.reduce((a, b) => (a.w * a.h >= b.w * b.h ? a : b));
+  if (!(await ensureScale(largest))) {
+    setStatus('Abgebrochen – ohne Maßstab lassen sich keine Maße berechnen.', true);
+    return;
+  }
+  state.rooms = [];
+  state.openings = [];
+  const ordered = [...rects].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  ordered.forEach((r, i) => state.rooms.push(roomFromPxRect(r, analysis, `Raum ${i + 1}`)));
+  state.rooms.forEach(joinNeighbours);
+  state.background.visible = true;
+  resolveAllFurniture();
+  save();
+  selected = null;
+  renderSelection();
+  render();
+  setStatus(`${state.rooms.length} Räume gefunden. Bitte prüfen: Fehlende Räume mit dem Zauberstab ergänzen, `
+    + 'falsche anklicken und löschen. Türen und Fenster über die Wände einsetzen.');
+}
 
 // ---------- Automatische Erkennung per Claude ----------
 
@@ -387,6 +546,7 @@ function applyDetectedPlan(plan) {
   const thickness = clamp(Math.round(plan.wall_thickness_cm) || WALL, 5, 50);
 
   bg.scale = scale;
+  bg.calibrated = true;
   bg.x = 0;
   bg.y = 0;
   bg.visible = true;
@@ -453,6 +613,8 @@ importEls.upload.addEventListener('click', () => importEls.file.click());
 importEls.file.addEventListener('change', handleUpload);
 importEls.calibrate.addEventListener('click', () => setPlanMode(planMode?.type === 'calibrate' ? null : 'calibrate'));
 importEls.trace.addEventListener('click', () => setPlanMode(planMode?.type === 'trace' ? null : 'trace'));
+importEls.wand.addEventListener('click', () => setPlanMode(planMode?.type === 'wand' ? null : 'wand'));
+importEls.autofind.addEventListener('click', autoFindRooms);
 importEls.opacity.addEventListener('input', () => {
   state.background.opacity = Number(importEls.opacity.value) / 100;
   save();

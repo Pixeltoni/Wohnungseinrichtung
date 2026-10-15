@@ -23,7 +23,9 @@ Keine Installation nötig: Öffne einfach `index.html` im Browser (Doppelklick).
 
 Unter **„Grundriss importieren“** ein Bild des Grundrisses hochladen (JPG/PNG; bei PDFs einen Screenshot). Es liegt dann als Hintergrund im Plan.
 
-- **Automatisch erkennen (KI):** Claude liest Räume, Maße, Türen und Fenster aus dem Bild und legt daraus Räume an. Dafür ist ein eigener API-Schlüssel von [console.anthropic.com](https://console.anthropic.com/) nötig. Der Schlüssel wird nur im eigenen Browser gespeichert, und das Bild geht direkt vom Browser an die Anthropic-API. Funktioniert nur über die veröffentlichte Webseite, nicht beim direkten Öffnen der Datei.
+- **Räume automatisch finden (kostenlos, ohne KI):** Die App wertet das Bild selbst aus. Dunkle Flächen gelten als Wände, und jeder von Wänden umschlossene Bereich wird ein Raum, inklusive gemessener Wanddicken. Türöffnungen halten die Erkennung nicht auf. Ist noch kein Maßstab festgelegt, fragt die App nach der echten Breite des größten Raums. Klappt am besten mit dunklen Wänden auf hellem Grund; Raumnamen, Türen und Fenster werden dabei nicht erkannt.
+- **Zauberstab:** In einen Raum auf dem Bild klicken, er wird einzeln erkannt und angelegt. Gut zum Ergänzen, wenn die automatische Suche einen Raum übersehen hat.
+- **Mit KI erkennen:** Claude liest Räume, Maße, Türen und Fenster aus dem Bild und legt daraus Räume an. Dafür ist ein eigener API-Schlüssel von [console.anthropic.com](https://console.anthropic.com/) nötig. Der Schlüssel wird nur im eigenen Browser gespeichert, und das Bild geht direkt vom Browser an die Anthropic-API. Funktioniert nur über die veröffentlichte Webseite, nicht beim direkten Öffnen der Datei.
 - **Von Hand:** Zuerst **„Maßstab festlegen“**: zwei Punkte einer Strecke mit bekannter Länge anklicken und die echte Länge eingeben. Dann **„Räume nachzeichnen“**: Rechtecke entlang der Innenkanten der Räume ziehen.
 
 Danach sind alle Räume ganz normal bearbeitbar (Maße, Wände, Türen, Fenster).
