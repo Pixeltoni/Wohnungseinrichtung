@@ -43,6 +43,7 @@ let selected = null; // { kind: 'room' | 'furniture' | 'wall' | 'opening', id, s
 let drag = null;
 let viewBox = null;
 let planMode = null; // Zeichen-/Kalibriermodus, gesteuert von plan-import.js
+let camera = null; // gezoomter/verschobener Ausschnitt { x, y, w, h } in cm; null = alles einpassen
 
 // ---------- Zustand ----------
 
@@ -435,6 +436,151 @@ function setWallThickness(r, side, t) {
   r.thickness[side] = t;
 }
 
+// ---------- Verbundene Räume ----------
+
+// Abstand zwischen den Innenkanten von r und o auf der Seite `side` von r
+// (null, wenn o dort nicht gegenüberliegt).
+function facingGap(r, side, o) {
+  const hOverlap = o.x < r.x + r.width && r.x < o.x + o.width;
+  const vOverlap = o.y < r.y + r.length && r.y < o.y + o.length;
+  switch (side) {
+    case 'right': return vOverlap ? o.x - (r.x + r.width) : null;
+    case 'left': return vOverlap ? r.x - (o.x + o.width) : null;
+    case 'bottom': return hOverlap ? o.y - (r.y + r.length) : null;
+    default: return hOverlap ? r.y - (o.y + o.length) : null;
+  }
+}
+
+// Berühren oder überlappen sich die Wände zweier Räume, werden sie zu einer
+// gemeinsamen Wand: `room` rückt so, dass genau eine Wand dazwischen liegt.
+function connectRoom(room) {
+  for (const o of state.rooms) {
+    if (o.id === room.id) continue;
+    for (const side of SIDES) {
+      const gap = facingGap(room, side, o);
+      if (gap === null || gap < 0) continue;
+      const own = room.thickness[side];
+      const other = o.thickness[OPPOSITE[side]];
+      if (gap > own + other + 2) continue;
+      const t = Math.max(own, other);
+      const [nx, ny] = OUTWARD[side];
+      moveRoom(room, room.x + nx * (gap - t), room.y + ny * (gap - t));
+      room.thickness[side] = t;
+      o.thickness[OPPOSITE[side]] = t;
+    }
+  }
+}
+
+// Auch ältere Planungen mit doppelten Wänden zusammenführen.
+function connectAllRooms() {
+  const ordered = [...state.rooms].sort((a, b) => (a.x + a.y) - (b.x + b.y));
+  for (const room of ordered.slice(1)) connectRoom(room);
+}
+
+// ---------- Räume an den Wänden größer/kleiner ziehen ----------
+
+const EDGE_SNAP = 15;
+
+function edgeOf(r, side) {
+  switch (side) {
+    case 'left': return r.x;
+    case 'right': return r.x + r.width;
+    case 'top': return r.y;
+    default: return r.y + r.length;
+  }
+}
+
+function roomSnapshot(r) {
+  return {
+    r, x: r.x, y: r.y, width: r.width, length: r.length,
+    offsets: state.openings.filter((o) => o.roomId === r.id).map((o) => [o, o.offset]),
+  };
+}
+
+// Türen und Fenster bleiben an ihrer Stelle, wenn sich der Wandanfang verschiebt.
+function keepOpeningsInPlace(s) {
+  for (const [o, off] of s.offsets) {
+    const horizontal = o.side === 'top' || o.side === 'bottom';
+    o.offset = off - (horizontal ? s.r.x - s.x : s.r.y - s.y);
+  }
+  clampOpenings(s.r);
+}
+
+// Merkt sich Raum und Nachbarn hinter den bewegten Wänden. Eine gemeinsame Wand
+// wird mitgezogen: Der Nachbarraum wird dabei entsprechend größer bzw. kleiner.
+function beginResize(room, sides) {
+  const neighbours = {};
+  for (const side of sides) {
+    neighbours[side] = state.rooms
+      .filter((o) => o.id !== room.id && isAdjacent(room, side, o))
+      .map(roomSnapshot);
+  }
+  return { room, sides, start: roomSnapshot(room), neighbours };
+}
+
+function applyResizeEdge(ctx, side, edge) {
+  const { room: r, start: s } = ctx;
+  const t = r.thickness[side];
+  const ns = ctx.neighbours[side];
+  let min = -Infinity;
+  let max = Infinity;
+  if (side === 'right') {
+    min = s.x + MIN_ROOM;
+    for (const n of ns) max = Math.min(max, n.x + n.width - MIN_ROOM - t);
+  } else if (side === 'left') {
+    max = s.x + s.width - MIN_ROOM;
+    for (const n of ns) min = Math.max(min, n.x + MIN_ROOM + t);
+  } else if (side === 'bottom') {
+    min = s.y + MIN_ROOM;
+    for (const n of ns) max = Math.min(max, n.y + n.length - MIN_ROOM - t);
+  } else {
+    max = s.y + s.length - MIN_ROOM;
+    for (const n of ns) min = Math.max(min, n.y + MIN_ROOM + t);
+  }
+  edge = clamp(edge, min, max);
+
+  if (side === 'left') { r.x = edge; r.width = s.x + s.width - edge; }
+  if (side === 'right') r.width = edge - r.x;
+  if (side === 'top') { r.y = edge; r.length = s.y + s.length - edge; }
+  if (side === 'bottom') r.length = edge - r.y;
+
+  for (const n of ns) {
+    const o = n.r;
+    if (side === 'right') { o.x = edge + t; o.width = n.x + n.width - o.x; }
+    if (side === 'left') o.width = edge - t - o.x;
+    if (side === 'bottom') { o.y = edge + t; o.length = n.y + n.length - o.y; }
+    if (side === 'top') o.length = edge - t - o.y;
+    keepOpeningsInPlace(n);
+  }
+  keepOpeningsInPlace(s);
+}
+
+// Gezogene Wand rastet an Kanten anderer Räume ein (bündig oder als gemeinsame Wand).
+function snapEdge(ctx, side, edge) {
+  const r = ctx.room;
+  const moving = new Set([r.id, ...Object.values(ctx.neighbours).flat().map((n) => n.r.id)]);
+  const vertical = side === 'left' || side === 'right';
+  let best = null;
+  for (const o of state.rooms) {
+    if (moving.has(o.id)) continue;
+    const candidates = vertical
+      ? [o.x, o.x + o.width, side === 'right' ? o.x - r.thickness.right : o.x + o.width + r.thickness.left]
+      : [o.y, o.y + o.length, side === 'bottom' ? o.y - r.thickness.bottom : o.y + o.length + r.thickness.top];
+    for (const v of candidates) {
+      const d = Math.abs(v - edge);
+      if (d <= EDGE_SNAP && (!best || d < best.d)) best = { v, d };
+    }
+  }
+  return best ? best.v : edge;
+}
+
+// Größe über das Panel ändern: wie das Ziehen der rechten bzw. unteren Wand.
+function resizeRoomTo(r, key, value) {
+  const side = key === 'width' ? 'right' : 'bottom';
+  const ctx = beginResize(r, [side]);
+  applyResizeEdge(ctx, side, (side === 'right' ? r.x : r.y) + value);
+}
+
 // ---------- Prüfungen ----------
 
 function furnitureStatus() {
@@ -488,8 +634,10 @@ function computeViewBox() {
 }
 
 function render() {
-  // Während des Ziehens bleibt der Ausschnitt stehen, damit nichts springt.
-  if ((!drag && !planMode) || !viewBox) viewBox = computeViewBox();
+  // Hat man gezoomt oder verschoben, gilt dieser Ausschnitt (camera). Sonst wird
+  // alles eingepasst; während des Ziehens bleibt der Ausschnitt stehen.
+  if (camera) viewBox = camera;
+  else if ((!drag && !planMode) || !viewBox) viewBox = computeViewBox();
   const vb = viewBox;
   const font = Math.max(10, Math.min(vb.w, vb.h) / 50);
   const status = furnitureStatus();
@@ -544,6 +692,7 @@ function render() {
     ${furniture}
     ${doorSwings}
     ${selectionOverlay()}
+    ${resizeHandles(font)}
     ${typeof planModeOverlay === 'function' ? planModeOverlay(font) : ''}
     ${scaleBar(vb, font)}`;
 }
@@ -565,7 +714,10 @@ const contentLayer = svg.querySelector('#content-layer');
 let bgLayerSrc = null;
 
 function renderBackground(vb) {
-  for (const [k, v] of Object.entries({ x: vb.x, y: vb.y, width: vb.w, height: vb.h })) gridLayer.setAttribute(k, v);
+  // Raster großzügig über den Ausschnitt hinaus, damit auch die Ränder neben dem
+  // (seitenverhältnis-treuen) Ausschnitt ein Raster haben.
+  const grid = { x: vb.x - vb.w, y: vb.y - vb.h, width: vb.w * 3, height: vb.h * 3 };
+  for (const [k, v] of Object.entries(grid)) gridLayer.setAttribute(k, v);
   const bg = state.background;
   if (!bg || !bg.visible) {
     bgLayer.setAttribute('display', 'none');
@@ -672,6 +824,37 @@ function selectionOverlay() {
   const b = bandRect(l.axis, l.c, l.start, l.end, l.t);
   return `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="#2f6fde" fill-opacity="0.25"
     stroke="#2f6fde" stroke-width="3" pointer-events="none" />`;
+}
+
+// Griffe zum Größer-/Kleinerziehen am ausgewählten Raum: Wandmitten und Ecken.
+function resizeHandles(font) {
+  if (!selected || selected.kind !== 'room') return '';
+  const r = roomById(selected.id);
+  if (!r) return '';
+  const t = r.thickness;
+  const left = r.x - t.left / 2;
+  const right = r.x + r.width + t.right / 2;
+  const top = r.y - t.top / 2;
+  const bottom = r.y + r.length + t.bottom / 2;
+  const cx = r.x + r.width / 2;
+  const cy = r.y + r.length / 2;
+  const long = font * 2.6;
+  const short = font * 1.1;
+  const handle = (side, x, y, w, h) => `
+    <rect class="handle" data-kind="handle" data-id="${r.id}" data-side="${side}"
+      x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="${Math.min(w, h) / 3}"
+      fill="#ffffff" stroke="#2f6fde" stroke-width="${font * 0.15}" />`;
+  return `
+    <rect x="${r.x}" y="${r.y}" width="${r.width}" height="${r.length}" fill="none"
+      stroke="#2f6fde" stroke-width="${font * 0.12}" stroke-dasharray="${font * 0.5} ${font * 0.3}" pointer-events="none" />
+    ${handle('top', cx, top, long, short)}
+    ${handle('bottom', cx, bottom, long, short)}
+    ${handle('left', left, cy, short, long)}
+    ${handle('right', right, cy, short, long)}
+    ${handle('top-left', left, top, short, short)}
+    ${handle('top-right', right, top, short, short)}
+    ${handle('bottom-left', left, bottom, short, short)}
+    ${handle('bottom-right', right, bottom, short, short)}`;
 }
 
 function scaleBar(vb, font) {
@@ -843,7 +1026,7 @@ function addRoom(name, width, length, thickness) {
     y = rightmost.y;
   }
   const room = { id: uid(), name, x, y, width, length, removedWalls: [], thickness: uniformThickness(thickness) };
-  syncSharedWalls(room);
+  connectRoom(room);
   state.rooms.push(room);
   resolveAllFurniture();
   save();
@@ -994,7 +1177,7 @@ function applyField(field, raw) {
   if (selected.kind === 'room' || selected.kind === 'wall') {
     if (field === 'x' || field === 'y') {
       moveRoom(item, field === 'x' ? value : item.x, field === 'y' ? value : item.y);
-      syncSharedWalls(item);
+      connectRoom(item);
     } else if (field === 'wall-thickness') {
       if (value < MIN_THICKNESS || value > MAX_THICKNESS) return;
       setWallThickness(item, selected.side, value);
@@ -1003,8 +1186,7 @@ function applyField(field, raw) {
       const key = field === 'wall-length'
         ? (selected.side === 'top' || selected.side === 'bottom' ? 'width' : 'length')
         : field;
-      item[key] = value;
-      clampOpenings(item);
+      resizeRoomTo(item, key, value);
     }
     resolveAllFurniture();
   } else if (selected.kind === 'opening') {
@@ -1030,13 +1212,137 @@ function toSvgPoint(e) {
   return pt.matrixTransform(svg.getScreenCTM().inverse());
 }
 
+// ---------- Ansicht: zoomen und verschieben ----------
+
+const MIN_VIEW = 50; // cm
+const MAX_VIEW = 50000;
+
+function svgScale() {
+  return svg.getScreenCTM().a; // Bildschirmpixel pro cm
+}
+
+function zoomAt(clientX, clientY, factor) {
+  const cam = camera || { ...viewBox };
+  const size = clamp(cam.w * factor, MIN_VIEW, MAX_VIEW);
+  factor = size / cam.w;
+  const p = toSvgPoint({ clientX, clientY });
+  camera = {
+    x: p.x - (p.x - cam.x) * factor,
+    y: p.y - (p.y - cam.y) * factor,
+    w: cam.w * factor,
+    h: cam.h * factor,
+  };
+  render();
+}
+
+function zoomCenter(factor) {
+  const box = svg.getBoundingClientRect();
+  zoomAt(box.left + box.width / 2, box.top + box.height / 2, factor);
+}
+
+function panBy(dxPx, dyPx) {
+  const cam = camera || { ...viewBox };
+  const s = svgScale();
+  camera = { ...cam, x: cam.x - dxPx / s, y: cam.y - dyPx / s };
+  render();
+}
+
+function fitView() {
+  camera = null;
+  viewBox = null;
+  render();
+}
+
+svg.addEventListener('wheel', (e) => {
+  // Auch Strg+Mausrad und Trackpad-Zoom abfangen, damit nicht die ganze Seite zoomt.
+  e.preventDefault();
+  const unit = e.deltaMode === 1 ? 16 : 1;
+  const factor = Math.exp(e.deltaY * unit * (e.ctrlKey ? 0.01 : 0.0015));
+  zoomAt(e.clientX, e.clientY, clamp(factor, 0.67, 1.5));
+}, { passive: false });
+
+document.getElementById('zoom-in').addEventListener('click', () => zoomCenter(1 / 1.3));
+document.getElementById('zoom-out').addEventListener('click', () => zoomCenter(1.3));
+document.getElementById('zoom-fit').addEventListener('click', fitView);
+
+// Zwei Finger: zoomen und verschieben.
+const touches = new Map();
+let pinch = null;
+
+function pinchState() {
+  const [a, b] = [...touches.values()];
+  return { dist: Math.hypot(a.x - b.x, a.y - b.y), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+}
+
 svg.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch') return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (touches.size === 2) {
+    if (drag) endDrag();
+    pinch = pinchState();
+    e.stopImmediatePropagation();
+  }
+}, true);
+
+svg.addEventListener('pointermove', (e) => {
+  if (!touches.has(e.pointerId)) return;
+  touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (!pinch || touches.size !== 2) return;
+  e.stopImmediatePropagation();
+  const now = pinchState();
+  if (now.dist > 0) zoomAt(now.mid.x, now.mid.y, pinch.dist / now.dist);
+  panBy(now.mid.x - pinch.mid.x, now.mid.y - pinch.mid.y);
+  pinch = now;
+}, true);
+
+function endTouch(e) {
+  touches.delete(e.pointerId);
+  if (touches.size < 2) pinch = null;
+}
+svg.addEventListener('pointerup', endTouch, true);
+svg.addEventListener('pointercancel', endTouch, true);
+
+// ---------- Ziehen: Räume, Wände, Möbel, Öffnungen, Ansicht ----------
+
+// Wand des ausgewählten Raums (auch die gemeinsame Wand, die der Nachbar zeichnet)?
+function selectedRoomSide(el) {
+  if (!selected || selected.kind !== 'room') return null;
+  const room = roomById(selected.id);
+  if (!room) return null;
+  if (el.dataset.id === room.id) return el.dataset.side;
+  const other = roomById(el.dataset.id);
+  const side = OPPOSITE[el.dataset.side];
+  return other && isAdjacent(room, side, other) ? side : null;
+}
+
+function startResize(room, sides, e) {
+  const p = toSvgPoint(e);
+  drag = { kind: 'resize', item: room, ctx: beginResize(room, sides), grab: p, moved: false };
+  svg.setPointerCapture(e.pointerId);
+}
+
+svg.addEventListener('pointerdown', (e) => {
+  if (pinch) return;
   const el = e.target.closest('[data-kind]');
-  if (!el) {
-    select(null);
+  // Leere Fläche oder mittlere Maustaste: Ansicht verschieben.
+  if (!el || e.button === 1) {
+    e.preventDefault();
+    drag = { kind: 'pan', last: { x: e.clientX, y: e.clientY }, start: { x: e.clientX, y: e.clientY }, moved: false };
+    svg.setPointerCapture(e.pointerId);
     return;
   }
   const kind = el.dataset.kind;
+  if (kind === 'handle') {
+    startResize(roomById(el.dataset.id), el.dataset.side.split('-'), e);
+    return;
+  }
+  if (kind === 'wall') {
+    const side = selectedRoomSide(el);
+    if (side) {
+      startResize(roomById(selected.id), [side], e);
+      return;
+    }
+  }
   const sel = kind === 'wall'
     ? { kind, id: el.dataset.id, side: el.dataset.side }
     : { kind, id: el.dataset.id };
@@ -1057,10 +1363,24 @@ svg.addEventListener('pointerdown', (e) => {
 });
 
 svg.addEventListener('pointermove', (e) => {
-  if (!drag) return;
+  if (!drag || pinch) return;
+  if (drag.kind === 'pan') {
+    if (!drag.moved && Math.hypot(e.clientX - drag.start.x, e.clientY - drag.start.y) < 4) return;
+    drag.moved = true;
+    svg.classList.add('panning');
+    panBy(e.clientX - drag.last.x, e.clientY - drag.last.y);
+    drag.last = { x: e.clientX, y: e.clientY };
+    return;
+  }
   const p = toSvgPoint(e);
   const item = drag.item;
-  if (drag.kind === 'opening') {
+  if (drag.kind === 'resize') {
+    const { ctx, grab } = drag;
+    for (const side of ctx.sides) {
+      const delta = side === 'left' || side === 'right' ? p.x - grab.x : p.y - grab.y;
+      applyResizeEdge(ctx, side, snapEdge(ctx, side, snap(edgeOf(ctx.start, side) + delta)));
+    }
+  } else if (drag.kind === 'opening') {
     const { line } = openingSpan(item);
     const along = line.axis === 'h' ? p.x : p.y;
     const offset = snap(along - drag.grab - line.start);
@@ -1087,9 +1407,14 @@ function endDrag() {
   if (!drag) return;
   const { moved, kind, item } = drag;
   drag = null;
-  svg.classList.remove('dragging');
+  svg.classList.remove('dragging', 'panning');
+  if (kind === 'pan') {
+    if (!moved) select(null); // einfacher Klick ins Leere hebt die Auswahl auf
+    return;
+  }
   if (moved) {
-    if (kind === 'room') syncSharedWalls(item);
+    if (kind === 'room') connectRoom(item);
+    if (kind === 'resize') syncSharedWalls(item);
     resolveAllFurniture();
     commit();
   }
@@ -1132,7 +1457,11 @@ selectionEl.addEventListener('click', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.target.closest('input, textarea, select') || !selected) return;
+  if (e.target.closest('input, textarea, select')) return;
+  if (e.key === '+' || e.key === '=') { zoomCenter(1 / 1.3); return; }
+  if (e.key === '-') { zoomCenter(1.3); return; }
+  if (e.key === '0') { fitView(); return; }
+  if (!selected) return;
   const step = e.shiftKey ? 10 : 1;
   const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
   if (moves[e.key]) {
@@ -1180,12 +1509,16 @@ document.getElementById('reset').addEventListener('click', () => {
 function replaceState(next) {
   state = next;
   planMode = null;
+  camera = null;
+  connectAllRooms();
   save();
   select(null);
   if (typeof updateImportPanel === 'function') updateImportPanel();
 }
 
+connectAllRooms();
 resolveAllFurniture();
+save();
 renderCatalog();
 renderSelection();
 render();

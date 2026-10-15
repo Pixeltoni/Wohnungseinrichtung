@@ -10,6 +10,7 @@ html, body {
 
 body {
   display: flex;
+  overflow: hidden; /* nur Seitenleiste und Plan scrollen bzw. zoomen, nie die ganze Seite */
 }
 
 .sidebar {
@@ -52,12 +53,9 @@ button.primary:hover { background: #255bb8; }
 button.active { background: #2f6fde; border-color: #2f6fde; color: #fff; }
 button:disabled { opacity: 0.5; cursor: default; }
 
-details.ai { margin: 8px 0; padding: 8px; border: 1px solid #dde1e6; border-radius: 6px; }
-details.ai summary { cursor: pointer; font-size: 0.9rem; font-weight: 600; }
 .status { min-height: 1em; }
 .status.error { color: #b42318; }
 input[type="range"] { width: 100%; }
-input[type="password"] { padding: 6px 8px; border: 1px solid #c8ced5; border-radius: 6px; font: inherit; }
 
 .mode-hint {
   position: absolute;
@@ -73,6 +71,26 @@ input[type="password"] { padding: 6px 8px; border: 1px solid #c8ced5; border-rad
   pointer-events: none;
 }
 #plan.drawing, #plan.drawing * { cursor: crosshair; }
+#plan.panning, #plan.panning * { cursor: grabbing; }
+#plan .handle { cursor: pointer; }
+#plan .handle[data-side="left"], #plan .handle[data-side="right"] { cursor: ew-resize; }
+#plan .handle[data-side="top"], #plan .handle[data-side="bottom"] { cursor: ns-resize; }
+#plan .handle[data-side="top-left"], #plan .handle[data-side="bottom-right"] { cursor: nwse-resize; }
+#plan .handle[data-side="top-right"], #plan .handle[data-side="bottom-left"] { cursor: nesw-resize; }
+
+.view-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 4px;
+}
+.view-controls button {
+  min-width: 36px;
+  background: #fff;
+  box-shadow: 0 1px 3px #0002;
+  font-size: 1rem;
+}
 
 .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .buttons.stack { flex-direction: column; }
