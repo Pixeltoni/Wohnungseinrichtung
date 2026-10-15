@@ -46,6 +46,21 @@
     <section>
       <h2>Möbel</h2>
       <p class="hint">Klicken, um ein Möbelstück in den ausgewählten (oder ersten) Raum zu stellen.</p>
+      <details class="custom">
+        <summary>Eigenes Möbelstück erstellen</summary>
+        <form id="custom-form" class="grid-form">
+          <label>Name <input name="name" value="Mein Möbel" required></label>
+          <label>Breite (cm) <input name="width" type="number" min="5" step="1" value="100" required></label>
+          <label>Tiefe (cm) <input name="depth" type="number" min="5" step="1" value="50" required></label>
+          <label>Form
+            <select name="shape"><option value="rect">Eckig</option><option value="round">Rund / oval</option></select>
+          </label>
+          <label>Farbe <input name="color" type="color" value="#b8c7e0"></label>
+          <label class="check"><input name="floor" type="checkbox"> Liegt am Boden (Teppich)</label>
+          <label class="check"><input name="keep" type="checkbox" checked> Unter „Eigene Möbel“ speichern</label>
+          <button type="submit">Einfügen</button>
+        </form>
+      </details>
       <div id="catalog" class="catalog"></div>
     </section>
 
@@ -70,7 +85,7 @@
       </p>
       <p class="hint">
         Ansicht: Mausrad zoomt, leere Fläche ziehen verschiebt die Ansicht (auf dem Handy mit zwei Fingern).
-        Tastatur: <kbd>R</kbd> drehen, <kbd>Entf</kbd> löschen, Pfeiltasten verschieben
+        Tastatur: <kbd>R</kbd> drehen (<kbd>Shift</kbd>+<kbd>R</kbd> in 15°-Schritten), <kbd>Entf</kbd> löschen, Pfeiltasten verschieben
         (mit <kbd>Shift</kbd> in 10-cm-Schritten), <kbd>+</kbd>/<kbd>−</kbd> zoomen, <kbd>0</kbd> einpassen.
         Die Planung wird automatisch im Browser gespeichert.
       </p>

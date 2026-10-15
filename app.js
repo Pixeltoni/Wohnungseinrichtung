@@ -19,20 +19,51 @@ const OPENING_DEFAULT_WIDTH = { door: 90, window: 120, passage: 100 };
 const MIN_THICKNESS = 1;
 const MAX_THICKNESS = 100;
 
+// Wand-Details: Nische (Vertiefung nach außen), Vorsprung (ragt in den Raum),
+// schräge Ecke. width/depth in cm; Nische und Vorsprung sitzen mit offset an einer Wand.
+const FEATURE_NAMES = { niche: 'Nische', pillar: 'Vorsprung', chamfer: 'Schräge Ecke' };
+const FEATURE_DEFAULTS = {
+  niche: { width: 100, depth: 40 },
+  pillar: { width: 40, depth: 30 },
+  chamfer: { width: 60, depth: 60 },
+};
+const CORNERS = ['top-left', 'top-right', 'bottom-right', 'bottom-left'];
+const CORNER_NAMES = {
+  'top-left': 'oben links', 'top-right': 'oben rechts', 'bottom-right': 'unten rechts', 'bottom-left': 'unten links',
+};
+const MIN_FEATURE = 5;
+
+// shape: 'rect' oder 'round'; floor: liegt am Boden (Teppich) und darf überlappt werden.
 const CATALOG = [
-  { name: 'Doppelbett', width: 160, depth: 200, color: '#a7c7f2' },
-  { name: 'Einzelbett', width: 90, depth: 200, color: '#bcd5f5' },
-  { name: 'Sofa', width: 220, depth: 95, color: '#c6b3e6' },
-  { name: 'Sessel', width: 85, depth: 85, color: '#d6c7ee' },
-  { name: 'Couchtisch', width: 110, depth: 60, color: '#e8c9a0' },
-  { name: 'Esstisch', width: 160, depth: 90, color: '#deb887' },
-  { name: 'Stuhl', width: 45, depth: 50, color: '#ecd3b0' },
-  { name: 'Schreibtisch', width: 140, depth: 70, color: '#d9b98c' },
-  { name: 'Kleiderschrank', width: 200, depth: 60, color: '#b8d8b0' },
-  { name: 'Kommode', width: 120, depth: 50, color: '#c9e2c1' },
-  { name: 'Regal', width: 80, depth: 35, color: '#d6ead0' },
-  { name: 'TV-Board', width: 180, depth: 45, color: '#cfd4da' },
+  { group: 'Wohnen', name: 'Sofa', width: 220, depth: 95, color: '#c6b3e6' },
+  { group: 'Wohnen', name: 'Sessel', width: 85, depth: 85, color: '#d6c7ee' },
+  { group: 'Wohnen', name: 'Couchtisch', width: 110, depth: 60, color: '#e8c9a0' },
+  { group: 'Wohnen', name: 'TV-Board', width: 180, depth: 45, color: '#cfd4da' },
+  { group: 'Wohnen', name: 'Regal', width: 80, depth: 35, color: '#d6ead0' },
+  { group: 'Wohnen', name: 'Teppich', width: 200, depth: 140, color: '#f1d9c7', floor: true },
+  { group: 'Wohnen', name: 'Pflanze', width: 40, depth: 40, color: '#a8d5a2', shape: 'round' },
+  { group: 'Schlafen', name: 'Doppelbett', width: 160, depth: 200, color: '#a7c7f2' },
+  { group: 'Schlafen', name: 'Einzelbett', width: 90, depth: 200, color: '#bcd5f5' },
+  { group: 'Schlafen', name: 'Nachttisch', width: 45, depth: 40, color: '#dcc3a1' },
+  { group: 'Schlafen', name: 'Kleiderschrank', width: 200, depth: 60, color: '#b8d8b0' },
+  { group: 'Schlafen', name: 'Kommode', width: 120, depth: 50, color: '#c9e2c1' },
+  { group: 'Essen & Arbeiten', name: 'Esstisch', width: 160, depth: 90, color: '#deb887' },
+  { group: 'Essen & Arbeiten', name: 'Runder Tisch', width: 110, depth: 110, color: '#deb887', shape: 'round' },
+  { group: 'Essen & Arbeiten', name: 'Stuhl', width: 45, depth: 50, color: '#ecd3b0' },
+  { group: 'Essen & Arbeiten', name: 'Schreibtisch', width: 140, depth: 70, color: '#d9b98c' },
+  { group: 'Essen & Arbeiten', name: 'Bürostuhl', width: 60, depth: 60, color: '#cfd4da', shape: 'round' },
+  { group: 'Küche', name: 'Küchenzeile', width: 240, depth: 60, color: '#e3e7eb' },
+  { group: 'Küche', name: 'Kühlschrank', width: 60, depth: 65, color: '#dbe4ee' },
+  { group: 'Küche', name: 'Herd', width: 60, depth: 60, color: '#c3ccd6' },
+  { group: 'Küche', name: 'Spüle', width: 80, depth: 60, color: '#d5e3ef' },
+  { group: 'Bad', name: 'Badewanne', width: 170, depth: 75, color: '#d4ecf7' },
+  { group: 'Bad', name: 'Dusche', width: 90, depth: 90, color: '#d4ecf7' },
+  { group: 'Bad', name: 'WC', width: 40, depth: 65, color: '#eef3f7' },
+  { group: 'Bad', name: 'Waschbecken', width: 60, depth: 45, color: '#eef3f7' },
+  { group: 'Bad', name: 'Waschmaschine', width: 60, depth: 60, color: '#dde3e9' },
 ];
+const SHAPE_NAMES = { rect: 'Eckig', round: 'Rund / oval' };
+const MIN_FURNITURE = 5;
 
 const svg = document.getElementById('plan');
 const selectionEl = document.getElementById('selection');
@@ -55,6 +86,8 @@ function defaultState() {
     }],
     furniture: [],
     openings: [],
+    features: [],
+    customCatalog: [], // eigene Möbel-Vorlagen
     background: null, // Grundrissbild: { dataUrl, width, height (px), scale (cm/px), x, y, opacity, visible }
   };
 }
@@ -78,9 +111,19 @@ function normalize(data) {
     for (const side of SIDES) r.thickness[side] = t[side] > 0 ? t[side] : WALL;
   }
   for (const f of data.furniture) {
-    if (![0, 90, 180, 270].includes(f.rotation)) f.rotation = 0;
+    f.rotation = Number.isFinite(f.rotation) ? ((f.rotation % 360) + 360) % 360 : 0;
+    if (!SHAPE_NAMES[f.shape]) f.shape = 'rect';
+    f.floor = !!f.floor;
+    if (typeof f.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(f.color)) f.color = '#cccccc';
   }
   data.openings = data.openings.filter((o) => data.rooms.some((r) => r.id === o.roomId));
+  if (!Array.isArray(data.features)) data.features = [];
+  data.features = data.features.filter((ft) => FEATURE_NAMES[ft.type]
+    && data.rooms.some((r) => r.id === ft.roomId)
+    && (ft.type === 'chamfer' ? CORNERS.includes(ft.corner) : SIDES.includes(ft.side))
+    && ft.width > 0 && ft.depth > 0);
+  if (!Array.isArray(data.customCatalog)) data.customCatalog = [];
+  data.customCatalog = data.customCatalog.filter((c) => c && c.name && c.width > 0 && c.depth > 0);
   const bg = data.background;
   const bgValid = bg && typeof bg.dataUrl === 'string' && bg.dataUrl.startsWith('data:image/')
     && bg.width > 0 && bg.height > 0 && bg.scale > 0;
@@ -121,6 +164,7 @@ function findItem(sel) {
   if (sel.kind === 'room' || sel.kind === 'wall') return roomById(sel.id);
   if (sel.kind === 'furniture') return state.furniture.find((f) => f.id === sel.id) || null;
   if (sel.kind === 'opening') return state.openings.find((o) => o.id === sel.id) || null;
+  if (sel.kind === 'feature') return state.features.find((ft) => ft.id === sel.id) || null;
   return null;
 }
 
@@ -138,10 +182,108 @@ function clamp(v, min, max) {
 
 // ---------- Geometrie ----------
 
-// Gedrehte Möbel: bei 90°/270° sind Breite und Tiefe vertauscht.
+// Möbel können beliebig gedreht sein (rotation in Grad, im Uhrzeigersinn).
+// x/y ist die linke obere Ecke des umschließenden Rechtecks; bei 0/90/180/270°
+// ist das genau das Möbelstück.
+function trig(deg) {
+  const a = ((deg % 360) + 360) % 360;
+  if (a === 0) return [1, 0];
+  if (a === 90) return [0, 1];
+  if (a === 180) return [-1, 0];
+  if (a === 270) return [0, -1];
+  const rad = (a * Math.PI) / 180;
+  return [Math.cos(rad), Math.sin(rad)];
+}
+
 function footprint(f) {
-  const turned = f.rotation % 180 !== 0;
-  return { x: f.x, y: f.y, w: turned ? f.depth : f.width, h: turned ? f.width : f.depth };
+  const [c, s] = trig(f.rotation);
+  return {
+    x: f.x,
+    y: f.y,
+    w: f.width * Math.abs(c) + f.depth * Math.abs(s),
+    h: f.width * Math.abs(s) + f.depth * Math.abs(c),
+  };
+}
+
+function furnitureCenter(f) {
+  const fp = footprint(f);
+  return [fp.x + fp.w / 2, fp.y + fp.h / 2];
+}
+
+// Lokale Möbel-Koordinaten (Mitte = 0/0, -y = Rückseite) in Weltkoordinaten.
+function toWorld(f, lx, ly, center = furnitureCenter(f)) {
+  const [c, s] = trig(f.rotation);
+  return [center[0] + lx * c - ly * s, center[1] + lx * s + ly * c];
+}
+
+// Ecken des Möbelstücks; die erste Kante ist die Rückseite.
+function furniturePoly(f) {
+  const center = furnitureCenter(f);
+  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => toWorld(f, (u * f.width) / 2, (v * f.depth) / 2, center));
+}
+
+function round1(v) {
+  return Math.round(v * 10) / 10;
+}
+
+function setCenter(f, cx, cy) {
+  const fp = footprint(f);
+  f.x = round1(cx - fp.w / 2);
+  f.y = round1(cy - fp.h / 2);
+}
+
+function rectPoly(r) {
+  return [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
+}
+
+function polyCenter(poly) {
+  const n = poly.length;
+  return [poly.reduce((a, p) => a + p[0], 0) / n, poly.reduce((a, p) => a + p[1], 0) / n];
+}
+
+function projectPoly(poly, nx, ny) {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const [x, y] of poly) {
+    const d = x * nx + y * ny;
+    if (d < min) min = d;
+    if (d > max) max = d;
+  }
+  return [min, max];
+}
+
+// Kleinste Verschiebung, die das (konvexe) Polygon a aus b herausschiebt, oder null.
+// Überlappungen unter einem halben Zentimeter zählen nicht.
+function satPush(a, b) {
+  let best = null;
+  for (const poly of [a, b]) {
+    for (let i = 0; i < poly.length; i++) {
+      const [x1, y1] = poly[i];
+      const [x2, y2] = poly[(i + 1) % poly.length];
+      let nx = y2 - y1;
+      let ny = x1 - x2;
+      const len = Math.hypot(nx, ny);
+      if (!len) continue;
+      nx /= len;
+      ny /= len;
+      const pa = projectPoly(a, nx, ny);
+      const pb = projectPoly(b, nx, ny);
+      const overlap = Math.min(pa[1], pb[1]) - Math.max(pa[0], pb[0]);
+      if (overlap <= 0.5) return null;
+      if (!best || overlap < best.d) best = { nx, ny, d: overlap };
+    }
+  }
+  const [ax, ay] = polyCenter(a);
+  const [bx, by] = polyCenter(b);
+  if ((ax - bx) * best.nx + (ay - by) * best.ny < 0) {
+    best.nx = -best.nx;
+    best.ny = -best.ny;
+  }
+  return best;
+}
+
+function polysOverlap(a, b) {
+  return satPush(a, b) !== null;
 }
 
 function roomRect(r) {
@@ -217,6 +359,85 @@ function openingSpan(o) {
   return { line, a, b: a + o.width };
 }
 
+// ---------- Wand-Details ----------
+
+// Abschnitt einer Wand (Innenkante), an dem eine Nische oder ein Vorsprung sitzt.
+function featureSpan(ft) {
+  const r = roomById(ft.roomId);
+  const line = wallLine(r, ft.side);
+  const a = line.start + ft.offset;
+  return { r, line, a, b: a + ft.width };
+}
+
+// Vorsprung: Wandstück, das in den Raum ragt.
+function pillarRect(ft) {
+  const { r, a, b } = featureSpan(ft);
+  const d = ft.depth;
+  switch (ft.side) {
+    case 'top': return { x: a, y: r.y, w: b - a, h: d };
+    case 'bottom': return { x: a, y: r.y + r.length - d, w: b - a, h: d };
+    case 'left': return { x: r.x, y: a, w: d, h: b - a };
+    default: return { x: r.x + r.width - d, y: a, w: d, h: b - a };
+  }
+}
+
+// Nische: Die Wand springt auf dem Abschnitt nach außen. Ergebnis: Bodenfläche,
+// neue Wandstücke (Rückwand und zwei Seiten) und die Lücke in der alten Wand.
+function nicheGeometry(ft) {
+  const { r, line, a, b } = featureSpan(ft);
+  const d = ft.depth;
+  const t = line.t;
+  const w = b - a;
+  const gap = { kind: 'niche', axis: line.axis, c: line.c, t, a, b };
+  switch (ft.side) {
+    case 'top':
+      return { gap, floor: { x: a, y: r.y - d, w, h: d },
+        walls: [{ x: a - t, y: r.y - d - t, w: w + 2 * t, h: t }, { x: a - t, y: r.y - d, w: t, h: d }, { x: b, y: r.y - d, w: t, h: d }] };
+    case 'bottom': {
+      const y0 = r.y + r.length;
+      return { gap, floor: { x: a, y: y0, w, h: d },
+        walls: [{ x: a - t, y: y0 + d, w: w + 2 * t, h: t }, { x: a - t, y: y0, w: t, h: d }, { x: b, y: y0, w: t, h: d }] };
+    }
+    case 'left':
+      return { gap, floor: { x: r.x - d, y: a, w: d, h: w },
+        walls: [{ x: r.x - d - t, y: a - t, w: t, h: w + 2 * t }, { x: r.x - d, y: a - t, w: d, h: t }, { x: r.x - d, y: b, w: d, h: t }] };
+    default: {
+      const x0 = r.x + r.width;
+      return { gap, floor: { x: x0, y: a, w: d, h: w },
+        walls: [{ x: x0 + d, y: a - t, w: t, h: w + 2 * t }, { x: x0, y: a - t, w: d, h: t }, { x: x0, y: b, w: d, h: t }] };
+    }
+  }
+}
+
+// Schräge Ecke: Dreieck in der Raumecke (width waagrecht, depth senkrecht).
+function chamferPoly(ft) {
+  const r = roomById(ft.roomId);
+  const left = r.x;
+  const right = r.x + r.width;
+  const top = r.y;
+  const bottom = r.y + r.length;
+  const a = ft.width;
+  const b = ft.depth;
+  switch (ft.corner) {
+    case 'top-left': return [[left, top], [left + a, top], [left, top + b]];
+    case 'top-right': return [[right, top], [right, top + b], [right - a, top]];
+    case 'bottom-right': return [[right, bottom], [right - a, bottom], [right, bottom - b]];
+    default: return [[left, bottom], [left, bottom - b], [left + a, bottom]];
+  }
+}
+
+// Bodenfläche eines Raums inkl. Nischen, abzüglich Vorsprüngen und schrägen Ecken.
+function roomArea(r) {
+  let area = r.width * r.length;
+  for (const ft of state.features) {
+    if (ft.roomId !== r.id) continue;
+    if (ft.type === 'niche') area += ft.width * ft.depth;
+    else if (ft.type === 'pillar') area -= ft.width * ft.depth;
+    else area -= (ft.width * ft.depth) / 2;
+  }
+  return area;
+}
+
 // Lücken in Wänden: entfernte Wände, Türen, Fenster und Durchgänge. Sie gelten
 // auch für die deckungsgleiche Wand des Nachbarraums.
 function wallGaps() {
@@ -230,6 +451,9 @@ function wallGaps() {
   for (const o of state.openings) {
     const { line, a, b } = openingSpan(o);
     gaps.push({ kind: o.type, axis: line.axis, c: line.c, t: line.t, a, b });
+  }
+  for (const ft of state.features) {
+    if (ft.type === 'niche') gaps.push(nicheGeometry(ft).gap);
   }
   return gaps;
 }
@@ -256,17 +480,29 @@ function wallPieces(gaps = wallGaps()) {
       }
     }
   }
+  for (const ft of state.features) {
+    if (ft.type !== 'niche') continue;
+    for (const rect of nicheGeometry(ft).walls) pieces.push({ roomId: ft.roomId, featureId: ft.id, rect });
+  }
   return pieces;
 }
 
-// Bereiche, die Möbel nicht belegen dürfen: Wände und Fenster.
+// Bereiche, die Möbel nicht belegen dürfen: Wände, Fenster, Vorsprünge und
+// schräge Ecken. rects dient zum Anrasten, polys zur Kollision.
 function obstacles() {
   const gaps = wallGaps();
   const rects = wallPieces(gaps).map((p) => p.rect);
   for (const g of gaps) {
     if (g.kind === 'window') rects.push(gapRect(g));
   }
-  return rects;
+  for (const ft of state.features) {
+    if (ft.type === 'pillar') rects.push(pillarRect(ft));
+  }
+  const polys = rects.map(rectPoly);
+  for (const ft of state.features) {
+    if (ft.type === 'chamfer') polys.push(chamferPoly(ft));
+  }
+  return { rects, polys };
 }
 
 // Begehbare Fläche: Rauminneres plus Öffnungen (entfernte Wände, Türen, Durchgänge).
@@ -274,6 +510,9 @@ function walkableRects() {
   const rects = state.rooms.map(roomRect);
   for (const g of wallGaps()) {
     if (g.kind !== 'window') rects.push(gapRect(g));
+  }
+  for (const ft of state.features) {
+    if (ft.type === 'niche') rects.push(nicheGeometry(ft).floor);
   }
   return rects;
 }
@@ -314,20 +553,21 @@ function hitsDoorSwing(rect, o) {
 // ---------- Ausrichten ----------
 
 // Schiebt ein Möbelstück aus Wänden heraus; mit magnet rastet es an nahe Wände an.
-function resolveFurniture(f, magnet, rects = obstacles()) {
-  for (let i = 0; i < 10; i++) {
-    const fp = footprint(f);
-    const hit = rects.find((w) => overlaps(fp, w));
-    if (!hit) break;
-    const ox = Math.min(fp.x + fp.w - hit.x, hit.x + hit.w - fp.x);
-    const oy = Math.min(fp.y + fp.h - hit.y, hit.y + hit.h - fp.y);
-    if (ox < oy) {
-      f.x += fp.x + fp.w / 2 < hit.x + hit.w / 2 ? hit.x - (fp.x + fp.w) : hit.x + hit.w - fp.x;
-    } else {
-      f.y += fp.y + fp.h / 2 < hit.y + hit.h / 2 ? hit.y - (fp.y + fp.h) : hit.y + hit.h - fp.y;
+function resolveFurniture(f, magnet, obs = obstacles()) {
+  for (let i = 0; i < 12; i++) {
+    const poly = furniturePoly(f);
+    let hit = null;
+    for (const o of obs.polys) {
+      hit = satPush(poly, o);
+      if (hit) break;
     }
+    if (!hit) break;
+    f.x = round1(f.x + hit.nx * hit.d);
+    f.y = round1(f.y + hit.ny * hit.d);
   }
-  if (!magnet) return;
+  // Anrasten nur bei rechtwinklig stehenden Möbeln.
+  if (!magnet || f.rotation % 90 !== 0) return;
+  const rects = obs.rects;
 
   const fp = footprint(f);
   let dx = null;
@@ -352,23 +592,37 @@ function resolveFurniture(f, magnet, rects = obstacles()) {
   if (dx !== null) f.x += dx;
   if (dy !== null) f.y += dy;
   // Falls das Anrasten in eine andere Wand führt, lieber nicht anrasten.
-  if (rects.some((w) => overlaps(footprint(f), w))) {
+  const snapped = furniturePoly(f);
+  if (obs.polys.some((o) => polysOverlap(snapped, o))) {
     f.x = before.x;
     f.y = before.y;
   }
 }
 
 function resolveAllFurniture() {
-  const rects = obstacles();
-  for (const f of state.furniture) resolveFurniture(f, false, rects);
+  const obs = obstacles();
+  for (const f of state.furniture) resolveFurniture(f, false, obs);
 }
 
+// Türen, Fenster und Wand-Details an die (evtl. geänderte) Raumgröße anpassen.
 function clampOpenings(r) {
   for (const o of state.openings) {
     if (o.roomId !== r.id) continue;
     const len = wallLength(r, o.side);
     o.width = Math.min(o.width, len);
     o.offset = clamp(o.offset, 0, len - o.width);
+  }
+  for (const ft of state.features) {
+    if (ft.roomId !== r.id) continue;
+    if (ft.type === 'chamfer') {
+      ft.width = clamp(ft.width, MIN_FEATURE, r.width);
+      ft.depth = clamp(ft.depth, MIN_FEATURE, r.length);
+      continue;
+    }
+    const len = wallLength(r, ft.side);
+    ft.width = clamp(ft.width, MIN_FEATURE, len);
+    ft.offset = clamp(ft.offset, 0, len - ft.width);
+    if (ft.type === 'pillar') ft.depth = clamp(ft.depth, MIN_FEATURE, wallLength(r, ft.side === 'top' || ft.side === 'bottom' ? 'left' : 'top') - MIN_FEATURE);
   }
 }
 
@@ -493,11 +747,13 @@ function edgeOf(r, side) {
 function roomSnapshot(r) {
   return {
     r, x: r.x, y: r.y, width: r.width, length: r.length,
-    offsets: state.openings.filter((o) => o.roomId === r.id).map((o) => [o, o.offset]),
+    offsets: [...state.openings, ...state.features]
+      .filter((o) => o.roomId === r.id && o.side)
+      .map((o) => [o, o.offset]),
   };
 }
 
-// Türen und Fenster bleiben an ihrer Stelle, wenn sich der Wandanfang verschiebt.
+// Türen, Fenster, Nischen und Vorsprünge bleiben an ihrer Stelle, wenn sich der Wandanfang verschiebt.
 function keepOpeningsInPlace(s) {
   for (const [o, off] of s.offsets) {
     const horizontal = o.side === 'top' || o.side === 'bottom';
@@ -584,25 +840,27 @@ function resizeRoomTo(r, key, value) {
 // ---------- Prüfungen ----------
 
 function furnitureStatus() {
-  const rects = state.furniture.map(footprint);
+  const polys = state.furniture.map(furniturePoly);
   const walkable = walkableRects();
   const doors = state.openings.filter((o) => o.type === 'door');
   const status = new Map();
   state.furniture.forEach((f, i) => {
-    const fp = rects[i];
-    const blocked = rects.some((r, j) => j !== i && overlaps(fp, r)) || doors.some((o) => hitsDoorSwing(fp, o));
-    status.set(f.id, blocked ? 'overlap' : isInside(fp, walkable) ? 'ok' : 'outside');
+    // Teppiche (floor) dürfen unter anderen Möbeln und im Türschwenk liegen.
+    const blocked = !f.floor && (
+      state.furniture.some((g, j) => j !== i && !g.floor && polysOverlap(polys[i], polys[j]))
+      || doors.some((o) => hitsDoorSwing(footprint(f), o)));
+    status.set(f.id, blocked ? 'overlap' : isInside(f, walkable) ? 'ok' : 'outside');
   });
   return status;
 }
 
 // Stichproben-Prüfung, ob ein Möbelstück vollständig auf begehbarer Fläche steht.
-function isInside(fp, walkable) {
+function isInside(f, walkable) {
   const steps = 8;
+  const center = furnitureCenter(f);
   for (let i = 0; i <= steps; i++) {
     for (let j = 0; j <= steps; j++) {
-      const x = fp.x + (fp.w * i) / steps;
-      const y = fp.y + (fp.h * j) / steps;
+      const [x, y] = toWorld(f, f.width * (i / steps - 0.5) * 0.999, f.depth * (j / steps - 0.5) * 0.999, center);
       if (!walkable.some((r) => pointIn(r, x, y))) return false;
     }
   }
@@ -661,11 +919,32 @@ function render() {
 
   const roomLabels = state.rooms.map((r) => roomLabelSvg(r, font)).join('');
 
-  const furniture = state.furniture.map((f) => furnitureSvg(f, status.get(f.id), font)).join('');
+  // Teppiche zuerst, damit sie unter den anderen Möbeln liegen.
+  const furniture = [...state.furniture.filter((f) => f.floor), ...state.furniture.filter((f) => !f.floor)]
+    .map((f) => furnitureSvg(f, status.get(f.id), font)).join('');
 
-  const walls = pieces.map((p) => `
+  const walls = pieces.map((p) => (p.featureId ? `
+    <rect class="wall" data-kind="feature" data-id="${p.featureId}"
+      x="${p.rect.x}" y="${p.rect.y}" width="${p.rect.w}" height="${p.rect.h}" fill="${isSelected('feature', p.featureId) ? '#2f6fde' : '#3e4c59'}" />` : `
     <rect class="wall" data-kind="wall" data-id="${p.roomId}" data-side="${p.side}"
-      x="${p.rect.x}" y="${p.rect.y}" width="${p.rect.w}" height="${p.rect.h}" fill="#3e4c59" />`).join('');
+      x="${p.rect.x}" y="${p.rect.y}" width="${p.rect.w}" height="${p.rect.h}" fill="#3e4c59" />`)).join('');
+
+  // Nischen-Böden (wie Raumfläche) sowie Vorsprünge und schräge Ecken (wie Wand).
+  const nicheFloors = state.features.filter((ft) => ft.type === 'niche').map((ft) => {
+    const { floor: f, gap } = nicheGeometry(ft);
+    const g = gapRect(gap);
+    const fill = isSelected('feature', ft.id) ? '#dbe7ff' : '#ffffff';
+    return `<g class="feature" data-kind="feature" data-id="${ft.id}">
+      <rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" fill="${fill}" fill-opacity="${roomOpacity}" />
+      <rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" fill="${fill}" fill-opacity="${roomOpacity}" /></g>`;
+  }).join('');
+  const solidFeatures = state.features.filter((ft) => ft.type !== 'niche').map((ft) => {
+    const color = isSelected('feature', ft.id) ? '#2f6fde' : '#3e4c59';
+    const shape = ft.type === 'pillar'
+      ? (() => { const r = pillarRect(ft); return `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${color}" />`; })()
+      : `<polygon points="${chamferPoly(ft).map((pt) => pt.join(',')).join(' ')}" fill="${color}" />`;
+    return `<g class="feature" data-kind="feature" data-id="${ft.id}">${shape}</g>`;
+  }).join('');
 
   const removedWalls = state.rooms.flatMap((r) => r.removedWalls.map((side) => {
     const l = wallLine(r, side);
@@ -684,15 +963,18 @@ function render() {
 
   contentLayer.innerHTML = `
     ${roomFills}
+    ${nicheFloors}
     ${passages}
     ${roomLabels}
     ${walls}
+    ${solidFeatures}
     ${removedWalls}
     ${openings}
     ${furniture}
     ${doorSwings}
     ${selectionOverlay()}
     ${resizeHandles(font)}
+    ${furnitureHandles(font)}
     ${typeof planModeOverlay === 'function' ? planModeOverlay(font) : ''}
     ${scaleBar(vb, font)}`;
 }
@@ -740,7 +1022,7 @@ function roomLabelSvg(r, font) {
   return `
     <g pointer-events="none" fill="#697586" font-size="${dim}">
       <text x="${cx}" y="${cy - font * 0.3}" font-size="${font}" text-anchor="middle" fill="#3e4c59" font-weight="600">${esc(r.name)}</text>
-      <text x="${cx}" y="${cy + font * 0.9}" text-anchor="middle">${(r.width * r.length / 10000).toFixed(1)} m²</text>
+      <text x="${cx}" y="${cy + font * 0.9}" text-anchor="middle">${(roomArea(r) / 10000).toFixed(1)} m²</text>
       <text x="${cx}" y="${r.y + pad + dim * 0.4}" text-anchor="middle">${r.width} cm</text>
       <text x="${cx}" y="${r.y + r.length - pad}" text-anchor="middle">${r.width} cm</text>
       <text transform="translate(${r.x + pad + dim * 0.4} ${cy}) rotate(-90)" text-anchor="middle">${r.length} cm</text>
@@ -749,32 +1031,51 @@ function roomLabelSvg(r, font) {
 }
 
 function furnitureSvg(f, st, font) {
-  const fp = footprint(f);
+  const [cx, cy] = furnitureCenter(f);
   const isSel = isSelected('furniture', f.id);
   const stroke = isSel ? '#2f6fde' : st === 'overlap' ? '#d92d20' : st === 'outside' ? '#f79009' : '#52606d';
-  const dash = st === 'outside' && !isSel ? 'stroke-dasharray="8 6"' : '';
-  const labelSize = Math.min(font * 0.8, fp.w / 5, fp.h / 2.5);
+  const dash = (st === 'outside' && !isSel) || f.floor ? 'stroke-dasharray="8 6"' : '';
+  const w = f.width;
+  const d = f.depth;
+  const style = `fill="${f.color}" fill-opacity="${f.floor ? 0.55 : 0.9}" stroke="${stroke}" stroke-width="${isSel ? 4 : 2.5}" ${dash}`;
+  const body = f.shape === 'round'
+    ? `<ellipse cx="0" cy="0" rx="${w / 2}" ry="${d / 2}" ${style} />`
+    : `<rect x="${-w / 2}" y="${-d / 2}" width="${w}" height="${d}" rx="4" ${style} />`;
+  // Dicke Linie an der Rückseite (z. B. Kopfende vom Bett, Lehne vom Sofa).
+  const back = f.shape === 'round' || f.floor ? ''
+    : `<line x1="${-w / 2 + 4}" y1="${-d / 2 + 4}" x2="${w / 2 - 4}" y2="${-d / 2 + 4}" stroke="#1f2933" stroke-opacity="0.45" stroke-width="5" stroke-linecap="round" pointer-events="none" />`;
+  const labelSize = Math.min(font * 0.8, Math.max(w, d) / 5, Math.min(w, d) / 2.5);
   return `
     <g class="furniture" data-kind="furniture" data-id="${f.id}">
-      <rect x="${fp.x}" y="${fp.y}" width="${fp.w}" height="${fp.h}" rx="4"
-        fill="${f.color}" fill-opacity="0.9" stroke="${stroke}" stroke-width="${isSel ? 4 : 2.5}" ${dash} />
-      ${backEdge(f, fp)}
-      <text x="${fp.x + fp.w / 2}" y="${fp.y + fp.h / 2}" font-size="${labelSize}"
+      <g transform="translate(${cx} ${cy}) rotate(${f.rotation})">${body}${back}</g>
+      <text x="${cx}" y="${cy}" font-size="${labelSize}" pointer-events="none"
         text-anchor="middle" dominant-baseline="middle" fill="#1f2933">${esc(f.name)}</text>
     </g>`;
 }
 
-// Dicke Linie an der Rückseite (z. B. Kopfende vom Bett, Lehne vom Sofa).
-function backEdge(f, fp) {
-  const inset = 4;
-  const lines = {
-    0: [fp.x + inset, fp.y + inset, fp.x + fp.w - inset, fp.y + inset],
-    90: [fp.x + fp.w - inset, fp.y + inset, fp.x + fp.w - inset, fp.y + fp.h - inset],
-    180: [fp.x + inset, fp.y + fp.h - inset, fp.x + fp.w - inset, fp.y + fp.h - inset],
-    270: [fp.x + inset, fp.y + inset, fp.x + inset, fp.y + fp.h - inset],
-  };
-  const [x1, y1, x2, y2] = lines[f.rotation];
-  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#1f2933" stroke-opacity="0.45" stroke-width="5" stroke-linecap="round" pointer-events="none" />`;
+// Griffe am ausgewählten Möbelstück: Größe (Seiten, Ecken) und Drehen (Kreis oben).
+function furnitureHandles(font) {
+  if (!selected || selected.kind !== 'furniture') return '';
+  const f = findItem(selected);
+  if (!f) return '';
+  const [cx, cy] = furnitureCenter(f);
+  const w = f.width / 2;
+  const d = f.depth / 2;
+  const size = font * 0.9;
+  const sw = font * 0.15;
+  const handle = (side, x, y) => `
+    <rect class="handle" data-kind="fhandle" data-id="${f.id}" data-side="${side}"
+      x="${x - size / 2}" y="${y - size / 2}" width="${size}" height="${size}" rx="${size / 4}"
+      fill="#ffffff" stroke="#2f6fde" stroke-width="${sw}" />`;
+  const rotY = -d - font * 2;
+  return `
+    <g transform="translate(${cx} ${cy}) rotate(${f.rotation})">
+      <line x1="0" y1="${-d}" x2="0" y2="${rotY}" stroke="#2f6fde" stroke-width="${sw}" pointer-events="none" />
+      <circle class="rotate-handle" data-kind="frotate" data-id="${f.id}" cx="0" cy="${rotY}" r="${size * 0.65}"
+        fill="#2f6fde" stroke="#ffffff" stroke-width="${sw}" />
+      ${handle('top', 0, -d)}${handle('bottom', 0, d)}${handle('left', -w, 0)}${handle('right', w, 0)}
+      ${handle('top-left', -w, -d)}${handle('top-right', w, -d)}${handle('bottom-left', -w, d)}${handle('bottom-right', w, d)}
+    </g>`;
 }
 
 function openingSvg(o) {
@@ -869,18 +1170,63 @@ function scaleBar(vb, font) {
     </g>`;
 }
 
+function catalogButton(c, attrs) {
+  return `<button type="button" ${attrs}>
+      <span class="dot${c.shape === 'round' ? ' round' : ''}" style="background:${esc(c.color)}"></span><span class="label">${esc(c.name)}</span>
+      <small>${c.width}×${c.depth}</small>
+    </button>`;
+}
+
 function renderCatalog() {
   const el = document.getElementById('catalog');
-  el.innerHTML = CATALOG.map((c, i) => `
-    <button type="button" data-index="${i}">
-      <span class="dot" style="background:${c.color}"></span><span class="label">${esc(c.name)}</span>
-      <small>${c.width}×${c.depth}</small>
-    </button>`).join('');
-  el.addEventListener('click', (e) => {
-    const btn = e.target.closest('button');
-    if (btn) addFurniture(CATALOG[Number(btn.dataset.index)]);
-  });
+  const groups = [];
+  for (const [i, c] of CATALOG.entries()) {
+    let g = groups.find((x) => x.name === c.group);
+    if (!g) groups.push(g = { name: c.group, items: [] });
+    g.items.push(catalogButton(c, `data-index="${i}"`));
+  }
+  const custom = state.customCatalog.map((c) => `<div class="custom-item">
+      ${catalogButton(c, `data-custom="${c.id}"`)}
+      <button type="button" class="remove" data-remove="${c.id}" title="Aus „Eigene Möbel“ entfernen" aria-label="${esc(c.name)} entfernen">×</button>
+    </div>`).join('');
+  el.innerHTML = (custom ? `<p class="catalog-group">Eigene Möbel</p><div class="catalog-grid">${custom}</div>` : '')
+    + groups.map((g) => `<p class="catalog-group">${g.name}</p><div class="catalog-grid">${g.items.join('')}</div>`).join('');
 }
+
+document.getElementById('catalog').addEventListener('click', (e) => {
+  const remove = e.target.closest('[data-remove]');
+  if (remove) {
+    state.customCatalog = state.customCatalog.filter((c) => c.id !== remove.dataset.remove);
+    save();
+    renderCatalog();
+    return;
+  }
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  if (btn.dataset.custom) addFurniture(state.customCatalog.find((c) => c.id === btn.dataset.custom));
+  else addFurniture(CATALOG[Number(btn.dataset.index)]);
+});
+
+// Eigenes Möbelstück aus dem Formular einfügen (und optional als Vorlage merken).
+document.getElementById('custom-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const data = new FormData(e.target);
+  const template = {
+    id: uid(),
+    name: String(data.get('name')).trim() || 'Möbelstück',
+    width: Number(data.get('width')),
+    depth: Number(data.get('depth')),
+    color: String(data.get('color')),
+    shape: SHAPE_NAMES[data.get('shape')] ? String(data.get('shape')) : 'rect',
+    floor: data.get('floor') === 'on',
+  };
+  if (!(template.width >= MIN_FURNITURE && template.depth >= MIN_FURNITURE)) return;
+  if (data.get('keep') === 'on') {
+    state.customCatalog.push(template);
+    renderCatalog();
+  }
+  addFurniture(template);
+});
 
 // ---------- Auswahl-Panel ----------
 
@@ -901,7 +1247,7 @@ function renderSelection() {
     selectionEl.innerHTML = '<p class="hint">Nichts ausgewählt. Klicke auf einen Raum, eine Wand oder ein Möbelstück.</p>';
     return;
   }
-  const renderers = { room: roomPanel, wall: wallPanel, opening: openingPanel, furniture: furniturePanel };
+  const renderers = { room: roomPanel, wall: wallPanel, opening: openingPanel, feature: featurePanel, furniture: furniturePanel };
   selectionEl.innerHTML = renderers[selected.kind](item);
 }
 
@@ -920,8 +1266,11 @@ function roomPanel(r) {
       ${numField('x', 'Position X (cm)', r.x)}
       ${numField('y', 'Position Y (cm)', r.y)}
     </div>
-    <p class="hint">Wände bearbeiten (Dicke, Türen, Fenster, Durchgänge, entfernen):</p>
+    <p class="hint">Wände bearbeiten (Dicke, Türen, Fenster, Nischen, Vorsprünge, entfernen):</p>
     <div class="buttons stack">${walls}</div>
+    <p class="hint">Ecke abschrägen:</p>
+    <div class="buttons">${CORNERS.map((c) => `<button type="button" data-action="add-chamfer" data-corner="${c}">${CORNER_NAMES[c]}</button>`).join('')}</div>
+    ${featureList(state.features.filter((ft) => ft.roomId === r.id && ft.type === 'chamfer'), 'Schräge Ecken:')}
     <div class="buttons">
       <button type="button" data-action="delete" class="danger">Raum löschen</button>
     </div>`;
@@ -948,7 +1297,51 @@ function wallPanel(r) {
       <button type="button" data-action="toggle-wall">${removed ? 'Wand wiederherstellen' : 'Ganze Wand entfernen'}</button>
     </div>
     ${list ? `<p class="hint">Öffnungen in dieser Wand:</p><div class="buttons stack">${list}</div>` : ''}
+    ${removed ? '' : `
+    <p class="hint">Wandform:</p>
+    <div class="buttons">
+      <button type="button" data-action="add-niche">+ Nische (Vertiefung)</button>
+      <button type="button" data-action="add-pillar">+ Vorsprung</button>
+    </div>`}
+    ${featureList(state.features.filter((ft) => ft.roomId === r.id && ft.side === side), 'Nischen und Vorsprünge in dieser Wand:')}
     <div class="buttons"><button type="button" data-action="select-room">← Zum Raum</button></div>`;
+}
+
+function featureList(features, title) {
+  if (!features.length) return '';
+  const buttons = features.map((ft) => `<button type="button" data-action="select-feature" data-id="${ft.id}">
+    ${FEATURE_NAMES[ft.type]}${ft.corner ? ` ${CORNER_NAMES[ft.corner]}` : ''} · ${ft.width} × ${ft.depth} cm</button>`).join('');
+  return `<p class="hint">${title}</p><div class="buttons stack">${buttons}</div>`;
+}
+
+function featurePanel(ft) {
+  const r = roomById(ft.roomId);
+  if (ft.type === 'chamfer') {
+    return `
+      <p class="panel-title">Schräge Ecke ${CORNER_NAMES[ft.corner]} – ${esc(r.name)}</p>
+      <div class="grid-form">
+        ${numField('width', 'Länge waagrecht (cm)', ft.width, MIN_FEATURE)}
+        ${numField('depth', 'Länge senkrecht (cm)', ft.depth, MIN_FEATURE)}
+      </div>
+      <div class="buttons">
+        <button type="button" data-action="select-room" data-room="${r.id}">← Zum Raum</button>
+        <button type="button" data-action="delete" class="danger">Löschen</button>
+      </div>`;
+  }
+  const horizontal = ft.side === 'top' || ft.side === 'bottom';
+  const what = ft.type === 'niche' ? 'Wie weit die Wand nach außen springt' : 'Wie weit es in den Raum ragt';
+  return `
+    <p class="panel-title">${FEATURE_NAMES[ft.type]} in Wand ${SIDE_NAMES[ft.side]} – ${esc(r.name)}</p>
+    <div class="grid-form">
+      ${numField('width', 'Breite (cm)', ft.width, MIN_FEATURE)}
+      ${numField('depth', 'Tiefe (cm)', ft.depth, MIN_FEATURE)}
+      ${numField('offset', `Abstand von ${horizontal ? 'links' : 'oben'} (cm)`, ft.offset, 0)}
+    </div>
+    <p class="hint">Tiefe: ${what}. Lässt sich auch mit der Maus entlang der Wand ziehen.</p>
+    <div class="buttons">
+      <button type="button" data-action="select-wall" data-side="${ft.side}" data-room="${ft.roomId}">← Zur Wand</button>
+      <button type="button" data-action="delete" class="danger">Löschen</button>
+    </div>`;
 }
 
 function openingPanel(o) {
@@ -978,14 +1371,20 @@ function furniturePanel(f) {
     <p class="panel-title">Möbelstück</p>
     <div class="grid-form">
       <label>Name <input data-field="name" value="${esc(f.name)}"></label>
-      ${numField('width', 'Breite (cm)', f.width, 5)}
-      ${numField('depth', 'Tiefe (cm)', f.depth, 5)}
+      ${numField('width', 'Breite (cm)', f.width, MIN_FURNITURE)}
+      ${numField('depth', 'Tiefe (cm)', f.depth, MIN_FURNITURE)}
+      ${numField('rotation', 'Drehung (Grad)', round1(f.rotation))}
+      ${selectField('shape', 'Form', f.shape, Object.entries(SHAPE_NAMES))}
+      <label>Farbe <input type="color" data-field="color" value="${esc(f.color)}"></label>
+      <label class="check"><input type="checkbox" data-field="floor" ${f.floor ? 'checked' : ''}> Liegt am Boden (Teppich, darf überlappt werden)</label>
       ${numField('x', 'Position X (cm)', f.x)}
       ${numField('y', 'Position Y (cm)', f.y)}
     </div>
+    <p class="hint">Am Plan: Griffe ziehen ändert die Größe, der runde Griff oben dreht (in 15°-Schritten, mit Alt frei).</p>
     <div class="buttons">
       <button type="button" data-action="rotate">Drehen (90°)</button>
       <button type="button" data-action="duplicate">Duplizieren</button>
+      <button type="button" data-action="save-template">Als eigenes Möbel speichern</button>
       <button type="button" data-action="delete" class="danger">Löschen</button>
     </div>`;
 }
@@ -999,6 +1398,8 @@ function refreshFields() {
     const field = input.dataset.field;
     if (field === 'wall-length') input.value = wallLength(item, selected.side);
     else if (field === 'wall-thickness') input.value = item.thickness[selected.side];
+    else if (input.type === 'checkbox') input.checked = !!item[field];
+    else if (field === 'rotation') input.value = round1(item.rotation);
     else if (field in item) input.value = item[field];
   }
 }
@@ -1044,6 +1445,8 @@ function addFurniture(template) {
     width: template.width,
     depth: template.depth,
     color: template.color,
+    shape: template.shape || 'rect',
+    floor: !!template.floor,
     rotation: 0,
     x: snap(cx - template.width / 2),
     y: snap(cy - template.depth / 2),
@@ -1076,6 +1479,22 @@ function addOpening(type) {
   select({ kind: 'opening', id: o.id });
 }
 
+function addFeature(type, corner) {
+  const r = findItem(selected);
+  const ft = { id: uid(), type, roomId: r.id, ...FEATURE_DEFAULTS[type] };
+  if (type === 'chamfer') {
+    ft.corner = corner;
+  } else {
+    ft.side = selected.side;
+    ft.offset = snap((wallLength(r, ft.side) - ft.width) / 2);
+  }
+  state.features.push(ft);
+  clampOpenings(r);
+  resolveAllFurniture();
+  save();
+  select({ kind: 'feature', id: ft.id });
+}
+
 function toggleWall() {
   const r = findItem(selected);
   const side = selected.side;
@@ -1084,25 +1503,38 @@ function toggleWall() {
     resolveAllFurniture();
   } else {
     r.removedWalls.push(side);
-    // Öffnungen einer entfernten Wand entfallen.
+    // Öffnungen und Wand-Details einer entfernten Wand entfallen.
     state.openings = state.openings.filter((o) => !(o.roomId === r.id && o.side === side));
+    state.features = state.features.filter((ft) => !(ft.roomId === r.id && ft.side === side));
   }
   save();
   renderSelection();
   render();
 }
 
-function rotateSelected() {
+// Drehen um den Mittelpunkt.
+function setRotation(f, deg) {
+  const [cx, cy] = furnitureCenter(f);
+  f.rotation = ((round1(deg) % 360) + 360) % 360;
+  setCenter(f, cx, cy);
+}
+
+function rotateSelected(step = 90) {
   if (!selected || selected.kind !== 'furniture') return;
   const f = findItem(selected);
-  const before = footprint(f);
-  f.rotation = (f.rotation + 90) % 360;
-  const after = footprint(f);
-  // Um den Mittelpunkt drehen.
-  f.x = snap(before.x + before.w / 2 - after.w / 2);
-  f.y = snap(before.y + before.h / 2 - after.h / 2);
+  setRotation(f, f.rotation + step);
   resolveFurniture(f, false);
   commit();
+}
+
+function saveAsTemplate() {
+  const f = findItem(selected);
+  if (!f) return;
+  state.customCatalog.push({ id: uid(), name: f.name, width: f.width, depth: f.depth, color: f.color, shape: f.shape, floor: f.floor });
+  save();
+  renderCatalog();
+  const btn = selectionEl.querySelector('[data-action="save-template"]');
+  if (btn) btn.textContent = 'Gespeichert ✓';
 }
 
 function duplicateSelected() {
@@ -1122,6 +1554,7 @@ function deleteSelected() {
     if (!confirm(`Raum „${item.name}“ löschen? Die Möbel darin bleiben erhalten.`)) return;
     state.rooms = state.rooms.filter((r) => r.id !== item.id);
     state.openings = state.openings.filter((o) => o.roomId !== item.id);
+    state.features = state.features.filter((ft) => ft.roomId !== item.id);
   } else if (selected.kind === 'wall') {
     if (!item.removedWalls.includes(selected.side)) toggleWall();
     return;
@@ -1129,6 +1562,11 @@ function deleteSelected() {
     state.openings = state.openings.filter((o) => o.id !== item.id);
     save();
     select({ kind: 'wall', id: item.roomId, side: item.side });
+    return;
+  } else if (selected.kind === 'feature') {
+    state.features = state.features.filter((ft) => ft.id !== item.id);
+    save();
+    select(item.side ? { kind: 'wall', id: item.roomId, side: item.side } : { kind: 'room', id: item.roomId });
     return;
   } else {
     state.furniture = state.furniture.filter((f) => f.id !== item.id);
@@ -1147,10 +1585,11 @@ function moveSelected(dx, dy) {
     item.x += dx;
     item.y += dy;
     resolveFurniture(item, false);
-  } else if (selected.kind === 'opening') {
+  } else if (selected.kind === 'opening' || (selected.kind === 'feature' && item.side)) {
     const horizontal = item.side === 'top' || item.side === 'bottom';
     item.offset += horizontal ? dx : dy;
     clampOpenings(roomById(item.roomId));
+    resolveAllFurniture();
   } else {
     return;
   }
@@ -1168,6 +1607,16 @@ function applyField(field, raw) {
   if (field === 'hinge' || field === 'swing') {
     item[field] = raw;
     resolveAllFurniture();
+    commit();
+    return;
+  }
+  if (field === 'color' || field === 'shape') {
+    item[field] = raw;
+    commit();
+    return;
+  }
+  if (field === 'floor') {
+    item.floor = raw;
     commit();
     return;
   }
@@ -1195,9 +1644,23 @@ function applyField(field, raw) {
     item[field] = value;
     clampOpenings(roomById(item.roomId));
     resolveAllFurniture();
-  } else {
-    if ((field === 'width' || field === 'depth') && value <= 0) return;
+  } else if (selected.kind === 'feature') {
+    if ((field === 'width' || field === 'depth') && value < MIN_FEATURE) return;
+    if (field === 'offset' && value < 0) return;
     item[field] = value;
+    clampOpenings(roomById(item.roomId));
+    resolveAllFurniture();
+  } else {
+    if ((field === 'width' || field === 'depth') && value < MIN_FURNITURE) return;
+    if (field === 'rotation') {
+      setRotation(item, value);
+    } else if (field === 'width' || field === 'depth') {
+      const [cx, cy] = furnitureCenter(item);
+      item[field] = value;
+      setCenter(item, cx, cy);
+    } else {
+      item[field] = value;
+    }
     resolveFurniture(item, false);
   }
   commit();
@@ -1336,6 +1799,15 @@ svg.addEventListener('pointerdown', (e) => {
     startResize(roomById(el.dataset.id), el.dataset.side.split('-'), e);
     return;
   }
+  if (kind === 'fhandle' || kind === 'frotate') {
+    const f = state.furniture.find((x) => x.id === el.dataset.id);
+    drag = {
+      kind, item: f, sides: kind === 'fhandle' ? el.dataset.side.split('-') : [],
+      grab: toSvgPoint(e), start: { width: f.width, depth: f.depth, center: furnitureCenter(f) }, moved: false,
+    };
+    svg.setPointerCapture(e.pointerId);
+    return;
+  }
   if (kind === 'wall') {
     const side = selectedRoomSide(el);
     if (side) {
@@ -1351,8 +1823,9 @@ svg.addEventListener('pointerdown', (e) => {
 
   const item = findItem(sel);
   const p = toSvgPoint(e);
-  if (kind === 'opening') {
-    const { line } = openingSpan(item);
+  if (kind === 'feature' && !item.side) return; // schräge Ecken nur über das Panel
+  if (kind === 'opening' || kind === 'feature') {
+    const { line } = kind === 'opening' ? openingSpan(item) : featureSpan(item);
     const along = line.axis === 'h' ? p.x : p.y;
     drag = { kind, item, grab: along - (line.start + item.offset), moved: false };
   } else {
@@ -1380,8 +1853,16 @@ svg.addEventListener('pointermove', (e) => {
       const delta = side === 'left' || side === 'right' ? p.x - grab.x : p.y - grab.y;
       applyResizeEdge(ctx, side, snapEdge(ctx, side, snap(edgeOf(ctx.start, side) + delta)));
     }
-  } else if (drag.kind === 'opening') {
-    const { line } = openingSpan(item);
+  } else if (drag.kind === 'fhandle') {
+    resizeFurniture(drag, p);
+  } else if (drag.kind === 'frotate') {
+    const [cx, cy] = drag.start.center;
+    let deg = (Math.atan2(p.y - cy, p.x - cx) * 180) / Math.PI + 90;
+    if (snapEl.checked && !e.altKey) deg = Math.round(deg / 15) * 15;
+    setRotation(item, deg);
+    setCenter(item, cx, cy);
+  } else if (drag.kind === 'opening' || drag.kind === 'feature') {
+    const { line } = drag.kind === 'opening' ? openingSpan(item) : featureSpan(item);
     const along = line.axis === 'h' ? p.x : p.y;
     const offset = snap(along - drag.grab - line.start);
     if (offset === item.offset) return;
@@ -1403,6 +1884,30 @@ svg.addEventListener('pointermove', (e) => {
   render();
 });
 
+// Möbel-Größe über die Griffe: Die Maus wird ins gedrehte Möbel-Koordinatensystem
+// umgerechnet; die gegenüberliegende Kante bleibt stehen.
+function resizeFurniture(d, p) {
+  const f = d.item;
+  const [c, s] = trig(f.rotation);
+  const dx = p.x - d.grab.x;
+  const dy = p.y - d.grab.y;
+  const du = dx * c + dy * s;
+  const dv = -dx * s + dy * c;
+  let left = -d.start.width / 2;
+  let right = d.start.width / 2;
+  let top = -d.start.depth / 2;
+  let bottom = d.start.depth / 2;
+  const size = (v) => Math.max(MIN_FURNITURE, snapEl.checked ? Math.round(v / SNAP) * SNAP : Math.round(v));
+  if (d.sides.includes('right')) right = left + size(right + du - left);
+  if (d.sides.includes('left')) left = right - size(right - (left + du));
+  if (d.sides.includes('bottom')) bottom = top + size(bottom + dv - top);
+  if (d.sides.includes('top')) top = bottom - size(bottom - (top + dv));
+  f.width = right - left;
+  f.depth = bottom - top;
+  const [cx, cy] = toWorld(f, (left + right) / 2, (top + bottom) / 2, d.start.center);
+  setCenter(f, cx, cy);
+}
+
 function endDrag() {
   if (!drag) return;
   const { moved, kind, item } = drag;
@@ -1417,6 +1922,8 @@ function endDrag() {
     if (kind === 'resize') syncSharedWalls(item);
     resolveAllFurniture();
     commit();
+  } else if (kind === 'fhandle' || kind === 'frotate') {
+    render();
   }
 }
 svg.addEventListener('pointerup', endDrag);
@@ -1435,7 +1942,7 @@ document.getElementById('room-form').addEventListener('submit', (e) => {
 
 selectionEl.addEventListener('input', (e) => {
   const field = e.target.dataset.field;
-  if (field) applyField(field, e.target.value);
+  if (field) applyField(field, e.target.type === 'checkbox' ? e.target.checked : e.target.value);
 });
 
 selectionEl.addEventListener('click', (e) => {
@@ -1443,13 +1950,18 @@ selectionEl.addEventListener('click', (e) => {
   if (!btn) return;
   const action = btn.dataset.action;
   if (action === 'rotate') rotateSelected();
+  else if (action === 'save-template') saveAsTemplate();
   else if (action === 'duplicate') duplicateSelected();
   else if (action === 'delete') deleteSelected();
   else if (action === 'toggle-wall') toggleWall();
   else if (action === 'add-door') addOpening('door');
   else if (action === 'add-window') addOpening('window');
   else if (action === 'add-passage') addOpening('passage');
-  else if (action === 'select-room') select({ kind: 'room', id: selected.id });
+  else if (action === 'add-niche') addFeature('niche');
+  else if (action === 'add-pillar') addFeature('pillar');
+  else if (action === 'add-chamfer') addFeature('chamfer', btn.dataset.corner);
+  else if (action === 'select-feature') select({ kind: 'feature', id: btn.dataset.id });
+  else if (action === 'select-room') select({ kind: 'room', id: btn.dataset.room || selected.id });
   else if (action === 'select-opening') select({ kind: 'opening', id: btn.dataset.id });
   else if (action === 'select-wall') {
     select({ kind: 'wall', id: btn.dataset.room || selected.id, side: btn.dataset.side });
@@ -1468,7 +1980,7 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     moveSelected(...moves[e.key]);
   } else if (e.key === 'r' || e.key === 'R') {
-    rotateSelected();
+    rotateSelected(e.shiftKey ? 15 : 90);
   } else if (e.key === 'Delete' || e.key === 'Backspace') {
     e.preventDefault();
     deleteSelected();

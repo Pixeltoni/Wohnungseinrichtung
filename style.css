@@ -73,6 +73,8 @@ input[type="range"] { width: 100%; }
 #plan.drawing, #plan.drawing * { cursor: crosshair; }
 #plan.panning, #plan.panning * { cursor: grabbing; }
 #plan .handle { cursor: pointer; }
+#plan .rotate-handle { cursor: grab; }
+#plan .feature { cursor: pointer; }
 #plan .handle[data-side="left"], #plan .handle[data-side="right"] { cursor: ew-resize; }
 #plan .handle[data-side="top"], #plan .handle[data-side="bottom"] { cursor: ns-resize; }
 #plan .handle[data-side="top-left"], #plan .handle[data-side="bottom-right"] { cursor: nwse-resize; }
@@ -97,7 +99,16 @@ input[type="range"] { width: 100%; }
 .buttons.stack button { text-align: left; }
 .panel-title { font-weight: 600; font-size: 0.9rem; margin: 0 0 8px; }
 
-.catalog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.catalog-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.catalog-group { font-size: 0.75rem; font-weight: 600; color: #52606d; text-transform: uppercase; letter-spacing: 0.03em; margin: 10px 0 4px; }
+.catalog .dot.round { border-radius: 50%; }
+.custom-item { display: flex; min-width: 0; }
+.custom-item button:first-child { flex: 1; min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.custom-item .remove { border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; padding: 0 8px; color: #b42318; }
+details.custom { margin: 6px 0 4px; padding: 8px; border: 1px solid #dde1e6; border-radius: 6px; }
+details.custom summary { cursor: pointer; font-size: 0.85rem; font-weight: 600; }
+details.custom form { margin-top: 8px; }
+input[type="color"] { width: 100%; height: 32px; padding: 2px; border: 1px solid #c8ced5; border-radius: 6px; background: #fff; }
 .catalog button { min-width: 0; text-align: left; display: flex; align-items: center; gap: 6px; font-size: 0.8rem; padding: 6px 7px; }
 .catalog .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .catalog .dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; border: 1px solid #0003; }
@@ -105,6 +116,7 @@ input[type="range"] { width: 100%; }
 
 .hint { font-size: 0.8rem; color: #697586; margin: 4px 0 8px; }
 .check { font-size: 0.85rem; display: flex; gap: 6px; align-items: center; }
+.grid-form label.check { display: flex; }
 
 kbd {
   padding: 0 4px;
