@@ -28,7 +28,7 @@ body {
 .grid-form { display: grid; gap: 8px; }
 .grid-form label { display: grid; gap: 2px; font-size: 0.85rem; }
 
-input[type="number"], input:not([type]) {
+input[type="number"], input:not([type]), select {
   padding: 6px 8px;
   border: 1px solid #c8ced5;
   border-radius: 6px;
@@ -49,6 +49,9 @@ button[type="submit"]:hover { background: #255bb8; }
 button.danger { color: #b42318; }
 
 .buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.buttons.stack { flex-direction: column; }
+.buttons.stack button { text-align: left; }
+.panel-title { font-weight: 600; font-size: 0.9rem; margin: 0 0 8px; }
 
 .catalog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .catalog button { min-width: 0; text-align: left; display: flex; align-items: center; gap: 6px; font-size: 0.8rem; padding: 6px 7px; }
@@ -84,6 +87,8 @@ kbd {
 
 #plan .room { cursor: move; }
 #plan .furniture { cursor: grab; }
+#plan .wall { cursor: pointer; }
+#plan .opening { cursor: ew-resize; }
 #plan .dragging { cursor: grabbing; }
 
 @media (max-width: 760px) {

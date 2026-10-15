@@ -28,7 +28,7 @@
 
     <section>
       <h2>Auswahl</h2>
-      <div id="selection"><p class="hint">Nichts ausgewählt. Klicke auf einen Raum oder ein Möbelstück.</p></div>
+      <div id="selection"></div>
     </section>
 
     <section>
@@ -41,11 +41,15 @@
       </div>
       <input id="import-file" type="file" accept="application/json" hidden>
       <p class="hint">
+        Räume rasten beim Verschieben an Nachbarräume an. Klicke auf eine Wand, um sie zu entfernen
+        oder Türen und Fenster einzusetzen. Möbel können nicht in Wände geschoben werden.
+      </p>
+      <p class="hint">
         Tastatur: <kbd>R</kbd> drehen, <kbd>Entf</kbd> löschen, Pfeiltasten verschieben
         (mit <kbd>Shift</kbd> in 10-cm-Schritten). Die Planung wird automatisch im Browser gespeichert.
       </p>
       <p class="legend">
-        <span class="swatch overlap"></span> überschneidet anderes Möbel
+        <span class="swatch overlap"></span> überschneidet Möbel oder Türschwenk
         <span class="swatch outside"></span> steht außerhalb eines Raums
       </p>
     </section>
