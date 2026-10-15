@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wohnungseinrichtung</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <h1>Wohnungseinrichtung</h1>
+
+    <section>
+      <h2>Raum hinzufügen</h2>
+      <form id="room-form" class="grid-form">
+        <label>Name <input name="name" value="Zimmer" required></label>
+        <label>Breite (cm) <input name="width" type="number" min="50" step="1" value="400" required></label>
+        <label>Länge (cm) <input name="length" type="number" min="50" step="1" value="350" required></label>
+        <button type="submit">Raum hinzufügen</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>Möbel</h2>
+      <p class="hint">Klicken, um ein Möbelstück in den ausgewählten (oder ersten) Raum zu stellen.</p>
+      <div id="catalog" class="catalog"></div>
+    </section>
+
+    <section>
+      <h2>Auswahl</h2>
+      <div id="selection"><p class="hint">Nichts ausgewählt. Klicke auf einen Raum oder ein Möbelstück.</p></div>
+    </section>
+
+    <section>
+      <h2>Planung</h2>
+      <label class="check"><input id="snap" type="checkbox" checked> Am 5-cm-Raster einrasten</label>
+      <div class="buttons">
+        <button id="export">Exportieren</button>
+        <button id="import">Importieren</button>
+        <button id="reset" class="danger">Neu beginnen</button>
+      </div>
+      <input id="import-file" type="file" accept="application/json" hidden>
+      <p class="hint">
+        Tastatur: <kbd>R</kbd> drehen, <kbd>Entf</kbd> löschen, Pfeiltasten verschieben
+        (mit <kbd>Shift</kbd> in 10-cm-Schritten). Die Planung wird automatisch im Browser gespeichert.
+      </p>
+      <p class="legend">
+        <span class="swatch overlap"></span> überschneidet anderes Möbel
+        <span class="swatch outside"></span> steht außerhalb eines Raums
+      </p>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <svg id="plan" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
