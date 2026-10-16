@@ -539,16 +539,16 @@ function walkableRects() {
 }
 
 // Geometrie einer Tür: Angel H, Türblatt-Ende T (offen), Schließpunkt O.
+// Die Tür ist in der Mitte der Wanddicke angeschlagen und schwenkt um 90°.
 function doorGeometry(o) {
   const { line, a, b } = openingSpan(o);
   const n = line.inward * (o.swing === 'out' ? -1 : 1);
-  const face = n * line.t / 2;
   const pt = (s, off) => (line.axis === 'h' ? [s, line.c + off] : [line.c + off, s]);
   const hingeT = o.hinge === 'end' ? b : a;
   const otherT = o.hinge === 'end' ? a : b;
-  const H = pt(hingeT, face);
-  const O = pt(otherT, face);
-  const T = pt(hingeT, face + n * o.width);
+  const H = pt(hingeT, 0);
+  const O = pt(otherT, 0);
+  const T = pt(hingeT, n * o.width);
   const xs = [H[0], O[0], T[0]];
   const ys = [H[1], O[1], T[1]];
   const swingBox = {
