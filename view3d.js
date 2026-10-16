@@ -197,12 +197,13 @@ function build() {
     if (g.kind === 'door' || g.kind === 'passage') {
       box(rect, DOOR_HEIGHT, H, wallMat);
     } else if (g.kind === 'window') {
-      box(rect, 0, Math.min(WINDOW_SILL, H), wallMat);
+      const sill = Math.min(Number.isFinite(g.sill) ? g.sill : WINDOW_SILL, WINDOW_TOP - 10);
+      box(rect, 0, Math.min(sill, H), wallMat);
       box(rect, WINDOW_TOP, H, wallMat);
       const glass = g.axis === 'h'
         ? { x: rect.x, y: rect.y + rect.h / 2 - 1, w: rect.w, h: 2 }
         : { x: rect.x + rect.w / 2 - 1, y: rect.y, w: 2, h: rect.h };
-      box(glass, WINDOW_SILL, Math.min(WINDOW_TOP, H), material(COLORS.glass, { transparent: true, opacity: 0.35, roughness: 0.1 }), false);
+      box(glass, sill, Math.min(WINDOW_TOP, H), material(COLORS.glass, { transparent: true, opacity: 0.35, roughness: 0.1 }), false);
     }
   }
 

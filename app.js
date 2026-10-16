@@ -16,6 +16,8 @@ const SIDES = ['top', 'right', 'bottom', 'left'];
 const SIDE_NAMES = { top: 'oben', right: 'rechts', bottom: 'unten', left: 'links' };
 const OPENING_NAMES = { door: 'Tür', window: 'Fenster', passage: 'Durchgang' };
 const OPENING_DEFAULT_WIDTH = { door: 90, window: 120, passage: 100 };
+const WINDOW_SILL = 90; // übliche Brüstungshöhe (Unterkante Fenster) in cm
+const MAX_SILL = 200;
 const MIN_THICKNESS = 1;
 const MAX_THICKNESS = 100;
 
@@ -373,6 +375,11 @@ function sameWallBand(g, line) {
   return g.axis === line.axis && Math.abs(g.c - line.c) < (g.t + line.t) / 2 - 0.5;
 }
 
+// Brüstungshöhe eines Fensters (0 = bodentief).
+function windowSill(o) {
+  return Number.isFinite(o.sill) ? o.sill : WINDOW_SILL;
+}
+
 function openingSpan(o) {
   const r = roomById(o.roomId);
   const line = wallLine(r, o.side);
@@ -471,7 +478,7 @@ function wallGaps() {
   }
   for (const o of state.openings) {
     const { line, a, b } = openingSpan(o);
-    gaps.push({ kind: o.type, axis: line.axis, c: line.c, t: line.t, a, b });
+    gaps.push({ kind: o.type, axis: line.axis, c: line.c, t: line.t, a, b, sill: o.type === 'window' ? windowSill(o) : undefined });
   }
   for (const ft of state.features) {
     if (ft.type === 'niche') gaps.push(nicheGeometry(ft).gap);
@@ -1123,10 +1130,12 @@ function openingSvg(o) {
       <path d="${jamb(a)} ${jamb(b)}" stroke="${color}" stroke-width="3" />
       <path d="${mid}" stroke="${color}" stroke-width="1" stroke-dasharray="4 6" />`;
   } else if (o.type === 'window') {
-    const mid = line.axis === 'h' ? `M ${a} ${line.c} H ${b}` : `M ${line.c} ${a} V ${b}`;
+    const along = (off) => (line.axis === 'h' ? `M ${a} ${line.c + off} H ${b}` : `M ${line.c + off} ${a} V ${b}`);
+    // Bodentiefes Fenster: zwei Glaslinien statt einer, damit man es im Grundriss erkennt.
+    const glass = windowSill(o) === 0 ? `${along(-line.t / 6)} ${along(line.t / 6)}` : along(0);
     inner = `
       ${rect} fill="#dbeafe" stroke="${color}" stroke-width="2" />
-      <path d="${mid}" stroke="${color}" stroke-width="1.5" />`;
+      <path d="${glass}" stroke="${color}" stroke-width="1.5" />`;
   } else {
     inner = `${rect} fill="#ffffff" />${doorSwingSvg(o)}`;
   }
@@ -1380,12 +1389,16 @@ function openingPanel(o) {
         ? [['start', 'links'], ['end', 'rechts']]
         : [['start', 'oben'], ['end', 'unten']])}
       ${selectField('swing', 'Öffnet', o.swing, [['in', `in den Raum „${esc(r.name)}“`], ['out', 'nach außen / in den Nachbarraum']])}` : '';
+  const windowFields = o.type === 'window' ? `
+      <label class="check"><input type="checkbox" data-field="floorLevel" ${windowSill(o) === 0 ? 'checked' : ''}> Bis zum Boden (bodentief)</label>
+      ${numField('sill', 'Brüstungshöhe über dem Boden (cm)', windowSill(o), 0)}` : '';
   return `
     <p class="panel-title">${OPENING_NAMES[o.type]} in Wand ${SIDE_NAMES[o.side]} – ${esc(r.name)}</p>
     <div class="grid-form">
       ${numField('width', 'Breite (cm)', o.width, MIN_OPENING)}
       ${numField('offset', `Abstand von ${horizontal ? 'links' : 'oben'} (cm)`, o.offset, 0)}
       ${doorFields}
+      ${windowFields}
     </div>
     <p class="hint">Tipp: Die Öffnung lässt sich auch mit der Maus entlang der Wand ziehen.</p>
     <div class="buttons">
@@ -1427,9 +1440,11 @@ function refreshFields() {
     const field = input.dataset.field;
     if (field === 'wall-length') input.value = wallLength(item, selected.side);
     else if (field === 'wall-thickness') input.value = item.thickness[selected.side];
+    else if (field === 'floorLevel') input.checked = windowSill(item) === 0;
     else if (input.type === 'checkbox') input.checked = !!item[field];
     else if (field === 'rotation') input.value = round1(item.rotation);
     else if (field === 'height') input.value = item.height || '';
+    else if (field === 'sill') input.value = windowSill(item);
     else if (field in item) input.value = item[field];
   }
 }
@@ -1647,6 +1662,18 @@ function applyField(field, raw) {
   }
   if (field === 'floor') {
     item.floor = raw;
+    commit();
+    return;
+  }
+  if (field === 'floorLevel') {
+    item.sill = raw ? 0 : WINDOW_SILL;
+    commit();
+    return;
+  }
+  if (field === 'sill') {
+    const sill = Number(raw);
+    if (raw === '' || !(sill >= 0 && sill <= MAX_SILL)) return;
+    item.sill = sill;
     commit();
     return;
   }
@@ -2070,7 +2097,7 @@ const lowWallsBtn = document.getElementById('low-walls');
 const wallHeightEl = document.getElementById('wall-height');
 
 // Muss bei Änderungen an view3d.js erhöht werden (umgeht alte Dateien im Browser-Cache).
-const VIEW3D_VERSION = 7;
+const VIEW3D_VERSION = 10;
 
 function hasWebGL() {
   try {
