@@ -173,6 +173,7 @@ function finishTrace(rect) {
     width: rect.w,
     length: rect.h,
     removedWalls: [],
+    wallMaterials: {},
     thickness: uniformThickness(thickness),
   };
   const [x, y] = snapRoomPosition(room, room.x, room.y);

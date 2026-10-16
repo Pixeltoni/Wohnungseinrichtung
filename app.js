@@ -16,6 +16,38 @@ const SIDES = ['top', 'right', 'bottom', 'left'];
 const SIDE_NAMES = { top: 'oben', right: 'rechts', bottom: 'unten', left: 'links' };
 const OPENING_NAMES = { door: 'Tür', window: 'Fenster', passage: 'Durchgang' };
 const OPENING_DEFAULT_WIDTH = { door: 90, window: 120, passage: 100 };
+// Materialien für die 3D-Ansicht. plan = leichter Farbton des Bodens im Grundriss.
+const FLOOR_MATERIALS = {
+  parkett: { name: 'Parkett', plan: '#ffffff' },
+  laminat: { name: 'Laminat (hell)', plan: '#ffffff' },
+  fliesen: { name: 'Fliesen', plan: '#f4f6f8' },
+  stein: { name: 'Steinboden', plan: '#f3f2ef' },
+  teppich: { name: 'Teppichboden', plan: '#f7f5f2' },
+  beton: { name: 'Beton', plan: '#f2f2f1' },
+  terrasse: { name: 'Holzterrasse', plan: '#faf3ea' },
+  wiese: { name: 'Wiese / Garten', plan: '#e6f2dc' },
+};
+const WALL_MATERIALS = {
+  weiss: { name: 'Weiß gestrichen' },
+  stein: { name: 'Steinwand' },
+  ziegel: { name: 'Ziegelwand' },
+  holz: { name: 'Holzwand' },
+  beton: { name: 'Sichtbeton' },
+  fliesen: { name: 'Fliesen' },
+};
+const GROUND_MATERIALS = { grau: 'Grau', wiese: 'Wiese' };
+
+function roomFloor(r) {
+  return FLOOR_MATERIALS[r.floorMaterial] ? r.floorMaterial : 'parkett';
+}
+
+// Material der Innenseite einer Wand: eigene Einstellung der Wand oder die des Raums.
+function roomWall(r, side) {
+  const own = r.wallMaterials && r.wallMaterials[side];
+  if (WALL_MATERIALS[own]) return own;
+  return WALL_MATERIALS[r.wallMaterial] ? r.wallMaterial : 'weiss';
+}
+
 const WINDOW_SILL = 90; // übliche Brüstungshöhe (Unterkante Fenster) in cm
 const MAX_SILL = 200;
 const MIN_THICKNESS = 1;
@@ -100,7 +132,7 @@ function defaultState() {
   return {
     rooms: [{
       id: uid(), name: 'Wohnzimmer', x: 0, y: 0, width: 500, length: 400,
-      removedWalls: [], thickness: uniformThickness(WALL),
+      removedWalls: [], wallMaterials: {}, thickness: uniformThickness(WALL),
     }],
     furniture: [],
     openings: [],
@@ -145,6 +177,10 @@ function normalize(data) {
     && ft.width > 0 && ft.depth > 0);
   if (!(data.wallHeight >= 100 && data.wallHeight <= 600)) data.wallHeight = 250;
   if (!(data.planOpacity >= 0.1 && data.planOpacity <= 1)) data.planOpacity = 1;
+  if (!GROUND_MATERIALS[data.ground]) data.ground = 'grau';
+  for (const r of data.rooms) {
+    if (!r.wallMaterials || typeof r.wallMaterials !== 'object') r.wallMaterials = {};
+  }
   if (!Array.isArray(data.customCatalog)) data.customCatalog = [];
   data.customCatalog = data.customCatalog.filter((c) => c && c.name && c.width > 0 && c.depth > 0);
   const bg = data.background;
@@ -416,7 +452,7 @@ function nicheGeometry(ft) {
   const d = ft.depth;
   const t = line.t;
   const w = b - a;
-  const gap = { kind: 'niche', axis: line.axis, c: line.c, t, a, b };
+  const gap = { kind: 'niche', roomId: ft.roomId, axis: line.axis, c: line.c, t, a, b };
   switch (ft.side) {
     case 'top':
       return { gap, floor: { x: a, y: r.y - d, w, h: d },
@@ -473,12 +509,14 @@ function wallGaps() {
   for (const r of state.rooms) {
     for (const side of r.removedWalls) {
       const line = wallLine(r, side);
-      gaps.push({ kind: 'removed', axis: line.axis, c: line.c, t: line.t, a: line.start, b: line.end });
+      // Inklusive Ecken: Steht die Querwand noch, deckt sie die Ecke ab; ist sie auch
+      // entfernt, bleibt kein einzelnes Mauerstück („Pfosten“) übrig.
+      gaps.push({ kind: 'removed', roomId: r.id, axis: line.axis, c: line.c, t: line.t, a: line.start - line.ext0, b: line.end + line.ext1 });
     }
   }
   for (const o of state.openings) {
     const { line, a, b } = openingSpan(o);
-    gaps.push({ kind: o.type, axis: line.axis, c: line.c, t: line.t, a, b, sill: o.type === 'window' ? windowSill(o) : undefined });
+    gaps.push({ kind: o.type, roomId: o.roomId, axis: line.axis, c: line.c, t: line.t, a, b, sill: o.type === 'window' ? windowSill(o) : undefined });
   }
   for (const ft of state.features) {
     if (ft.type === 'niche') gaps.push(nicheGeometry(ft).gap);
@@ -939,7 +977,7 @@ function render() {
 
   const roomFills = state.rooms.map((r) => `
     <rect class="room" data-kind="room" data-id="${r.id}" x="${r.x}" y="${r.y}" width="${r.width}" height="${r.length}"
-      fill="${isSelected('room', r.id) ? '#eef4ff' : '#ffffff'}" fill-opacity="${roomOpacity}" />`).join('');
+      fill="${isSelected('room', r.id) ? '#eef4ff' : FLOOR_MATERIALS[roomFloor(r)].plan}" fill-opacity="${roomOpacity}" />`).join('');
 
   const passages = gaps.filter((g) => g.kind === 'removed').map((g) => {
     const b = gapRect(g);
@@ -1302,6 +1340,8 @@ function roomPanel(r) {
       ${numField('length', 'Länge innen (cm)', r.length, MIN_ROOM)}
       ${numField('x', 'Position X (cm)', r.x)}
       ${numField('y', 'Position Y (cm)', r.y)}
+      ${selectField('floorMaterial', 'Bodenbelag (3D)', roomFloor(r), Object.entries(FLOOR_MATERIALS).map(([k, m]) => [k, m.name]))}
+      ${selectField('wallMaterial', 'Wände innen (3D)', WALL_MATERIALS[r.wallMaterial] ? r.wallMaterial : 'weiss', Object.entries(WALL_MATERIALS).map(([k, m]) => [k, m.name]))}
     </div>
     <p class="hint">Wände bearbeiten (Dicke, Türen, Fenster, Nischen, Vorsprünge, entfernen):</p>
     <div class="buttons stack">${walls}</div>
@@ -1325,6 +1365,8 @@ function wallPanel(r) {
     <div class="grid-form">
       ${numField('wall-length', 'Länge innen (cm)', wallLength(r, side), MIN_ROOM)}
       ${numField('wall-thickness', 'Wanddicke (cm)', r.thickness[side], MIN_THICKNESS)}
+      ${selectField('sideMaterial', 'Material dieser Wand innen (3D)', WALL_MATERIALS[r.wallMaterials[side]] ? r.wallMaterials[side] : '',
+        [['', `wie Raum (${WALL_MATERIALS[roomWall({ ...r, wallMaterials: {} }, side)].name})`], ...Object.entries(WALL_MATERIALS).map(([k, m]) => [k, m.name])])}
     </div>
     <p class="hint">Bei einer gemeinsamen Wand ändert sich die Dicke für beide Räume; der Nachbarraum rückt entsprechend.</p>
     <div class="buttons">
@@ -1471,7 +1513,7 @@ function addRoom(name, width, length, thickness) {
     x = rightmost.x + rightmost.width + rightmost.thickness.right;
     y = rightmost.y;
   }
-  const room = { id: uid(), name, x, y, width, length, removedWalls: [], thickness: uniformThickness(thickness) };
+  const room = { id: uid(), name, x, y, width, length, removedWalls: [], wallMaterials: {}, thickness: uniformThickness(thickness) };
   connectRoom(room);
   state.rooms.push(room);
   resolveAllFurniture();
@@ -1662,6 +1704,17 @@ function applyField(field, raw) {
   }
   if (field === 'floor') {
     item.floor = raw;
+    commit();
+    return;
+  }
+  if (field === 'floorMaterial' || field === 'wallMaterial') {
+    item[field] = raw; // einzeln eingestellte Wände (z. B. Akzentwand) bleiben erhalten
+    commit();
+    return;
+  }
+  if (field === 'sideMaterial') {
+    if (raw) item.wallMaterials[selected.side] = raw;
+    else delete item.wallMaterials[selected.side];
     commit();
     return;
   }
@@ -2095,9 +2148,10 @@ const view3dEl = document.getElementById('view3d');
 const toggle3dBtn = document.getElementById('toggle-3d');
 const lowWallsBtn = document.getElementById('low-walls');
 const wallHeightEl = document.getElementById('wall-height');
+const groundEl = document.getElementById('ground-material');
 
 // Muss bei Änderungen an view3d.js erhöht werden (umgeht alte Dateien im Browser-Cache).
-const VIEW3D_VERSION = 10;
+const VIEW3D_VERSION = 11;
 
 function hasWebGL() {
   try {
@@ -2140,6 +2194,7 @@ async function setView3d(on) {
   document.body.classList.toggle('mode-3d', on);
   toggle3dBtn.textContent = on ? '2D-Grundriss' : '3D-Ansicht';
   wallHeightEl.value = state.wallHeight;
+  groundEl.value = state.ground;
   if (on) {
     if (typeof setPlanMode === 'function' && planMode) setPlanMode(null);
   } else {
@@ -2155,6 +2210,11 @@ lowWallsBtn.addEventListener('click', () => {
   view3d.setLowWalls(low);
 });
 document.getElementById('reset-camera').addEventListener('click', () => view3d.resetCamera());
+groundEl.addEventListener('change', () => {
+  state.ground = groundEl.value;
+  save();
+  view3d.requestUpdate();
+});
 wallHeightEl.addEventListener('input', () => {
   const value = Number(wallHeightEl.value);
   if (!(value >= 100 && value <= 600)) return;

@@ -10,9 +10,7 @@ const WINDOW_TOP = 220;
 const LOW_WALL = 100;
 
 const COLORS = {
-  wall: 0xf3f1ec,
   wallTop: 0x4a5561,
-  floor: 0xe6d6bd,
   ground: 0xe9ecef,
   glass: 0x9cc8ea,
   selected: 0x2f6fde,
@@ -25,6 +23,7 @@ let controls;
 let container;
 let content;
 let sun;
+let ground;
 let lowWalls = false;
 let updatePending = false;
 let resizeObserver;
@@ -36,12 +35,246 @@ function material(color, opts = {}) {
   return materials[key];
 }
 
+// ---------- Texturen (im Browser gezeichnet, keine Bilddateien) ----------
+
+const TEX = 512;
+
+// Gleichbleibende Zufallszahlen, damit Texturen bei jedem Neuaufbau gleich aussehen.
+function seeded(seed) {
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shade(hex, amount) {
+  const c = new THREE.Color(hex);
+  c.lerp(new THREE.Color(amount >= 0 ? 0xffffff : 0x000000), Math.abs(amount));
+  return `#${c.getHexString()}`;
+}
+
+function speckle(ctx, rand, alpha, count) {
+  for (let i = 0; i < count; i++) {
+    ctx.fillStyle = rand() < 0.5 ? `rgba(0,0,0,${alpha})` : `rgba(255,255,255,${alpha})`;
+    ctx.fillRect(rand() * TEX, rand() * TEX, 1 + rand() * 2, 1 + rand() * 2);
+  }
+}
+
+const PAINTERS = {
+  // Dielen in Reihen mit versetzten Fugen und Maserung.
+  planks(ctx, rand, { base, rows, variation, grain = 3, vertical = false }) {
+    if (vertical) {
+      ctx.translate(TEX, 0);
+      ctx.rotate(Math.PI / 2);
+    }
+    const rowH = TEX / rows;
+    for (let r = 0; r < rows; r++) {
+      let x = -rand() * TEX * 0.5;
+      while (x < TEX) {
+        const len = TEX * (0.35 + rand() * 0.45);
+        ctx.fillStyle = shade(base, (rand() - 0.5) * variation);
+        ctx.fillRect(x, r * rowH, len, rowH);
+        ctx.strokeStyle = 'rgba(60,35,15,0.12)';
+        ctx.lineWidth = 1;
+        for (let g = 0; g < grain; g++) {
+          const y = r * rowH + 3 + rand() * (rowH - 6);
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.bezierCurveTo(x + len * 0.3, y + (rand() - 0.5) * 6, x + len * 0.7, y + (rand() - 0.5) * 6, x + len, y);
+          ctx.stroke();
+        }
+        ctx.fillStyle = 'rgba(40,25,10,0.35)';
+        ctx.fillRect(x, r * rowH, 2, rowH);
+        x += len;
+      }
+      ctx.fillStyle = 'rgba(40,25,10,0.35)';
+      ctx.fillRect(0, r * rowH, TEX, 2);
+    }
+  },
+  tiles(ctx, rand, { base, grout, n, variation }) {
+    ctx.fillStyle = grout;
+    ctx.fillRect(0, 0, TEX, TEX);
+    const cell = TEX / n;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        ctx.fillStyle = shade(base, (rand() - 0.5) * variation);
+        ctx.fillRect(i * cell + 3, j * cell + 3, cell - 6, cell - 6);
+      }
+    }
+    speckle(ctx, rand, 0.05, 3000);
+  },
+  bricks(ctx, rand, { base, mortar, rows }) {
+    ctx.fillStyle = mortar;
+    ctx.fillRect(0, 0, TEX, TEX);
+    const rowH = TEX / rows;
+    const brickW = rowH * 2.6;
+    for (let r = 0; r < rows; r++) {
+      const offset = r % 2 ? brickW / 2 : 0;
+      for (let x = -offset; x < TEX; x += brickW) {
+        ctx.fillStyle = shade(base, (rand() - 0.5) * 0.3);
+        ctx.fillRect(x + 3, r * rowH + 3, brickW - 6, rowH - 6);
+      }
+    }
+    speckle(ctx, rand, 0.08, 6000);
+  },
+  stones(ctx, rand, { base, mortar }) {
+    ctx.fillStyle = mortar;
+    ctx.fillRect(0, 0, TEX, TEX);
+    let y = 0;
+    while (y < TEX) {
+      const h = 40 + rand() * 50;
+      let x = -rand() * 40;
+      while (x < TEX) {
+        const w = 50 + rand() * 90;
+        ctx.fillStyle = shade(base, (rand() - 0.5) * 0.45);
+        ctx.beginPath();
+        ctx.roundRect(x + 4, y + 4, w - 8, h - 8, 10);
+        ctx.fill();
+        x += w;
+      }
+      y += h;
+    }
+    speckle(ctx, rand, 0.1, 8000);
+  },
+  grass(ctx, rand, { base }) {
+    ctx.fillStyle = base;
+    ctx.fillRect(0, 0, TEX, TEX);
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 9000; i++) {
+      const x = rand() * TEX;
+      const y = rand() * TEX;
+      ctx.strokeStyle = shade(base, (rand() - 0.5) * 0.6);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (rand() - 0.5) * 6, y - 4 - rand() * 8);
+      ctx.stroke();
+    }
+  },
+  plain(ctx, rand, { base, specks = 4000, alpha = 0.04, blotches = 0 }) {
+    ctx.fillStyle = base;
+    ctx.fillRect(0, 0, TEX, TEX);
+    for (let i = 0; i < blotches; i++) {
+      const x = rand() * TEX;
+      const y = rand() * TEX;
+      const r = 30 + rand() * 90;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `rgba(${rand() < 0.5 ? '0,0,0' : '255,255,255'},0.08)`);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    speckle(ctx, rand, alpha, specks);
+  },
+};
+
+// tile = wie viele cm eine Texturkachel in der Wirklichkeit abdeckt.
+const FLOOR_TEXTURES = {
+  parkett: { tile: 160, painter: 'planks', base: '#b98a5a', rows: 8, variation: 0.25 },
+  laminat: { tile: 200, painter: 'planks', base: '#d6bb93', rows: 6, variation: 0.12, grain: 2 },
+  fliesen: { tile: 120, painter: 'tiles', base: '#e4e3df', grout: '#b9b7b0', n: 2, variation: 0.05 },
+  stein: { tile: 160, painter: 'tiles', base: '#a39d93', grout: '#857f76', n: 2, variation: 0.3 },
+  teppich: { tile: 100, painter: 'plain', base: '#a9a196', specks: 40000, alpha: 0.08 },
+  beton: { tile: 250, painter: 'plain', base: '#b4b2ad', specks: 12000, alpha: 0.06, blotches: 40 },
+  terrasse: { tile: 150, painter: 'planks', base: '#9a6b43', rows: 6, variation: 0.2, grain: 2 },
+  wiese: { tile: 150, painter: 'grass', base: '#6ea84f' },
+};
+const WALL_TEXTURES = {
+  weiss: { tile: 200, painter: 'plain', base: '#f1efe9', specks: 3000, alpha: 0.025 },
+  stein: { tile: 160, painter: 'stones', base: '#9c958b', mortar: '#cfc8bc' },
+  ziegel: { tile: 120, painter: 'bricks', base: '#a8583b', mortar: '#d9d2c6', rows: 8 },
+  holz: { tile: 120, painter: 'planks', base: '#b58457', rows: 6, variation: 0.18, vertical: true },
+  beton: { tile: 250, painter: 'plain', base: '#c4c2bd', specks: 12000, alpha: 0.06, blotches: 40 },
+  fliesen: { tile: 80, painter: 'tiles', base: '#f4f4f2', grout: '#c9c9c4', n: 4, variation: 0.03 },
+};
+
+const texturedMaterials = {};
+let buildGaps = []; // Wandöffnungen, einmal pro Aufbau berechnet
+
+function texturedMaterial(kind, key) {
+  const id = `${kind}:${key}`;
+  if (texturedMaterials[id]) return texturedMaterials[id];
+  const def = (kind === 'floor' ? FLOOR_TEXTURES : WALL_TEXTURES)[key];
+  const canvas = document.createElement('canvas');
+  canvas.width = TEX;
+  canvas.height = TEX;
+  const ctx = canvas.getContext('2d');
+  PAINTERS[def.painter](ctx, seeded(id.length * 7919 + key.charCodeAt(0)), def);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  // Die Geometrie hat Texturkoordinaten in cm; eine Kachel deckt def.tile cm ab.
+  texture.repeat.set(1 / def.tile, 1 / def.tile);
+  texturedMaterials[id] = new THREE.MeshStandardMaterial({ map: texture, roughness: key === 'fliesen' ? 0.45 : 0.85 });
+  return texturedMaterials[id];
+}
+
+const floorMaterial = (key) => texturedMaterial('floor', key);
+const wallMaterial = (key) => texturedMaterial('wall', key);
+
+// Texturkoordinaten aus Weltkoordinaten (cm): waagrechte Flächen x/z, Wände entlang der Wand und Höhe.
+function worldUV(geo) {
+  const pos = geo.attributes.position;
+  const nrm = geo.attributes.normal;
+  const uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    const ax = Math.abs(nrm.getX(i));
+    const ay = Math.abs(nrm.getY(i));
+    const az = Math.abs(nrm.getZ(i));
+    let u;
+    let v;
+    if (ay >= ax && ay >= az) { u = pos.getX(i); v = pos.getZ(i); }
+    else if (ax >= az) { u = pos.getZ(i); v = pos.getY(i); }
+    else { u = pos.getX(i); v = pos.getY(i); }
+    uv[i * 2] = u;
+    uv[i * 2 + 1] = v;
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+}
+
+// Raum an einem Punkt des Grundrisses (inkl. Nischen und Wandöffnungen des Raums).
+function roomAtPoint(x, y) {
+  const inside = (r) => x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h;
+  const room = state.rooms.find((r) => inside(roomRect(r)));
+  if (room) return room;
+  const niche = state.features.find((ft) => ft.type === 'niche' && inside(nicheGeometry(ft).floor));
+  if (niche) return roomById(niche.roomId);
+  const gap = buildGaps.find((g) => g.kind !== 'window' && inside(gapRect(g)));
+  return gap ? roomById(gap.roomId) : null;
+}
+
+// Materialien der sechs Seiten eines Wandquaders (+x, -x, oben, unten, +z, -z):
+// Jede Seite bekommt das Wandmaterial des Raums, in den sie zeigt.
+function wallFaceMaterials(rect) {
+  const cx = rect.x + rect.w / 2;
+  const cz = rect.y + rect.h / 2;
+  const outside = wallMaterial('weiss');
+  const face = (x, y, side) => {
+    const room = roomAtPoint(x, y);
+    return room ? wallMaterial(roomWall(room, side)) : outside;
+  };
+  return [
+    face(rect.x + rect.w + 1, cz, 'left'),
+    face(rect.x - 1, cz, 'right'),
+    material(COLORS.wallTop),
+    outside,
+    face(cx, rect.y + rect.h + 1, 'top'),
+    face(cx, rect.y - 1, 'bottom'),
+  ];
+}
+
 // Quader über einem Grundriss-Rechteck { x, y, w, h } zwischen den Höhen y0 und y1.
+// mat: ein Material oder 'wall' (Material je Seite nach angrenzendem Raum).
 function box(rect, y0, y1, mat, shadows = true) {
   const h = y1 - y0;
   if (h <= 0 || rect.w <= 0 || rect.h <= 0) return null;
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(rect.w, h, rect.h), mat);
-  mesh.position.set(rect.x + rect.w / 2, y0 + h / 2, rect.y + rect.h / 2);
+  const geo = new THREE.BoxGeometry(rect.w, h, rect.h);
+  geo.translate(rect.x + rect.w / 2, y0 + h / 2, rect.y + rect.h / 2);
+  worldUV(geo);
+  const mesh = new THREE.Mesh(geo, mat === 'wall' ? wallFaceMaterials(rect) : mat);
   mesh.castShadow = shadows;
   mesh.receiveShadow = true;
   content.add(mesh);
@@ -168,12 +401,18 @@ function build() {
   }
   content = new THREE.Group();
   const H = wallHeight();
-  const wallMat = material(COLORS.wall);
-  const floorMat = material(COLORS.floor, { roughness: 0.7 });
+  const wallMat = 'wall';
+  buildGaps = wallGaps();
 
-  // Böden: Räume, Nischen und Durchgänge (Türen, Durchgänge, entfernte Wände).
-  const floors = walkableRects();
-  for (const rect of floors) box(rect, -2, 0, floorMat, false);
+  // Böden mit dem Belag des jeweiligen Raums: Räume, Nischen und Durchgänge.
+  for (const r of state.rooms) box(roomRect(r), -2, 0, floorMaterial(roomFloor(r)), false);
+  for (const ft of state.features) {
+    if (ft.type === 'niche') box(nicheGeometry(ft).floor, -2, 0, floorMaterial(roomFloor(roomById(ft.roomId))), false);
+  }
+  for (const g of buildGaps) {
+    const room = roomById(g.roomId);
+    if (g.kind !== 'window' && room) box(gapRect(g), -2, 0, floorMaterial(roomFloor(room)), false);
+  }
 
   // Wände, Vorsprünge und schräge Ecken.
   for (const p of wallPieces()) box(p.rect, 0, H, wallMat);
@@ -184,7 +423,9 @@ function build() {
       const shape = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, -y)));
       const geo = new THREE.ExtrudeGeometry(shape, { depth: H, bevelEnabled: false });
       geo.rotateX(-Math.PI / 2);
-      const mesh = new THREE.Mesh(geo, wallMat);
+      worldUV(geo);
+      const room = roomById(ft.roomId);
+      const mesh = new THREE.Mesh(geo, [material(COLORS.wallTop), wallMaterial(roomWall({ ...room, wallMaterials: {} }, 'top'))]);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       content.add(mesh);
@@ -192,7 +433,7 @@ function build() {
   }
 
   // Stürze über Türen/Durchgängen, Brüstung, Sturz und Glas bei Fenstern.
-  for (const g of wallGaps()) {
+  for (const g of buildGaps) {
     const rect = gapRect(g);
     if (g.kind === 'door' || g.kind === 'passage') {
       box(rect, DOOR_HEIGHT, H, wallMat);
@@ -209,7 +450,19 @@ function build() {
 
   for (const f of state.furniture) buildFurniture(f);
   scene.add(content);
+  ground.material = state.ground === 'wiese' ? groundGrass() : material(COLORS.ground);
   fitShadows();
+}
+
+let grassGround = null;
+function groundGrass() {
+  if (!grassGround) {
+    const base = floorMaterial('wiese');
+    const texture = base.map.clone();
+    texture.repeat.set(1 / 150, 1 / 150);
+    grassGround = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.95 });
+  }
+  return grassGround;
 }
 
 // Umfang aller Räume (für Kamera und Schatten).
@@ -284,9 +537,11 @@ function init(el) {
   sun.shadow.bias = -0.0005;
   scene.add(sun, sun.target);
 
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(100000, 100000), material(COLORS.ground));
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -3;
+  const groundGeo = new THREE.PlaneGeometry(100000, 100000);
+  groundGeo.rotateX(-Math.PI / 2);
+  groundGeo.translate(0, -3, 0);
+  worldUV(groundGeo);
+  ground = new THREE.Mesh(groundGeo, material(COLORS.ground));
   ground.receiveShadow = true;
   scene.add(ground);
 

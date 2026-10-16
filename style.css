@@ -106,6 +106,7 @@ body.mode-3d #plan, body.mode-3d #mode-hint { display: none; }
   background: #fff; border: 1px solid #c8ced5; border-radius: 6px; box-shadow: 0 1px 3px #0002;
 }
 .wall-height input { width: 64px; padding: 3px 4px; }
+.wall-height select { padding: 3px 4px; }
 .view-controls button.primary { background: #2f6fde; color: #fff; }
 .view-controls button.active { background: #2f6fde; color: #fff; }
 .view-controls button {
