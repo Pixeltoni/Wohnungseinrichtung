@@ -68,6 +68,22 @@ const MIN_FURNITURE = 5;
 const svg = document.getElementById('plan');
 const selectionEl = document.getElementById('selection');
 const snapEl = document.getElementById('snap');
+const wallSnapEl = document.getElementById('wall-snap');
+const WALL_SNAP_KEY = 'wohnungseinrichtung.wallSnap';
+
+// Einrasten beim Ziehen von Wänden: Einstellung pro Browser merken.
+try {
+  if (localStorage.getItem(WALL_SNAP_KEY) === 'off') wallSnapEl.checked = false;
+} catch {
+  // Kein Speicher verfügbar – Standard (an) gilt.
+}
+wallSnapEl.addEventListener('change', () => {
+  try {
+    localStorage.setItem(WALL_SNAP_KEY, wallSnapEl.checked ? 'on' : 'off');
+  } catch {
+    // Einstellung gilt dann nur bis zum Neuladen.
+  }
+});
 
 let state = load() || defaultState();
 let selected = null; // { kind: 'room' | 'furniture' | 'wall' | 'opening', id, side? }
@@ -1851,7 +1867,10 @@ svg.addEventListener('pointermove', (e) => {
     const { ctx, grab } = drag;
     for (const side of ctx.sides) {
       const delta = side === 'left' || side === 'right' ? p.x - grab.x : p.y - grab.y;
-      applyResizeEdge(ctx, side, snapEdge(ctx, side, snap(edgeOf(ctx.start, side) + delta)));
+      const raw = edgeOf(ctx.start, side) + delta;
+      // Mit gedrückter Alt-Taste gilt beim Ziehen jeweils das Gegenteil der Einstellung.
+      const snapping = wallSnapEl.checked !== e.altKey;
+      applyResizeEdge(ctx, side, snapping ? snapEdge(ctx, side, snap(raw)) : Math.round(raw));
     }
   } else if (drag.kind === 'fhandle') {
     resizeFurniture(drag, p);
