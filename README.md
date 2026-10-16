@@ -31,6 +31,12 @@ Zuerst **„Maßstab festlegen“**: zwei Punkte einer Strecke mit bekannter Lä
 
 Danach sind alle Räume ganz normal bearbeitbar (Maße, Wände, Türen, Fenster).
 
+## 3D-Ansicht
+
+Unten rechts schaltet **„3D-Ansicht“** zwischen Grundriss und 3D-Modell um. Das Modell zeigt Böden, Wände in einstellbarer Höhe, Türöffnungen, Fenster (mit Brüstung und Glas), Nischen, Vorsprünge, schräge Ecken und alle Möbel mit Licht und Schatten. Ziehen dreht die Ansicht, rechte Maustaste bzw. zwei Finger verschieben, das Mausrad zoomt. **„Niedrige Wände“** schneidet die Wände ab, um von oben in die Räume zu sehen. Möbelhöhen werden nach Art des Möbels geschätzt und lassen sich im Möbel-Panel unter „Höhe“ ändern. Alles, was in der Seitenleiste geändert wird, erscheint sofort im Modell.
+
+Die 3D-Ansicht nutzt [three.js](https://threejs.org/) (Version 0.169.0, MIT-Lizenz), gebündelt unter `vendor/three/`. Sie funktioniert über die veröffentlichte Webseite, nicht beim direkten Öffnen von `index.html` als Datei.
+
 ## Ansicht
 
 Mit dem **Mausrad** (oder Trackpad bzw. zwei Fingern) wird der Plan gezoomt, durch **Ziehen auf leerer Fläche** (oder mit der mittleren Maustaste) verschoben. Die Seitenleiste bleibt dabei immer sichtbar. Unten rechts gibt es **+**, **−** und **Einpassen**.

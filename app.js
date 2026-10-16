@@ -104,6 +104,7 @@ function defaultState() {
     openings: [],
     features: [],
     customCatalog: [], // eigene Möbel-Vorlagen
+    wallHeight: 250, // für die 3D-Ansicht
     background: null, // Grundrissbild: { dataUrl, width, height (px), scale (cm/px), x, y, opacity, visible }
   };
 }
@@ -130,6 +131,7 @@ function normalize(data) {
     f.rotation = Number.isFinite(f.rotation) ? ((f.rotation % 360) + 360) % 360 : 0;
     if (!SHAPE_NAMES[f.shape]) f.shape = 'rect';
     f.floor = !!f.floor;
+    if (!(f.height > 0)) delete f.height; // ohne eigene Höhe gilt die Standardhöhe nach Name
     if (typeof f.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(f.color)) f.color = '#cccccc';
   }
   data.openings = data.openings.filter((o) => data.rooms.some((r) => r.id === o.roomId));
@@ -138,6 +140,7 @@ function normalize(data) {
     && data.rooms.some((r) => r.id === ft.roomId)
     && (ft.type === 'chamfer' ? CORNERS.includes(ft.corner) : SIDES.includes(ft.side))
     && ft.width > 0 && ft.depth > 0);
+  if (!(data.wallHeight >= 100 && data.wallHeight <= 600)) data.wallHeight = 250;
   if (!Array.isArray(data.customCatalog)) data.customCatalog = [];
   data.customCatalog = data.customCatalog.filter((c) => c && c.name && c.width > 0 && c.depth > 0);
   const bg = data.background;
@@ -908,6 +911,7 @@ function computeViewBox() {
 }
 
 function render() {
+  if (is3d && view3d) view3d.requestUpdate();
   // Hat man gezoomt oder verschoben, gilt dieser Ausschnitt (camera). Sonst wird
   // alles eingepasst; während des Ziehens bleibt der Ausschnitt stehen.
   if (camera) viewBox = camera;
@@ -1389,6 +1393,7 @@ function furniturePanel(f) {
       <label>Name <input data-field="name" value="${esc(f.name)}"></label>
       ${numField('width', 'Breite (cm)', f.width, MIN_FURNITURE)}
       ${numField('depth', 'Tiefe (cm)', f.depth, MIN_FURNITURE)}
+      <label>Höhe (cm, für 3D) <input type="number" step="1" min="1" data-field="height" value="${f.height || ''}" placeholder="automatisch"></label>
       ${numField('rotation', 'Drehung (Grad)', round1(f.rotation))}
       ${selectField('shape', 'Form', f.shape, Object.entries(SHAPE_NAMES))}
       <label>Farbe <input type="color" data-field="color" value="${esc(f.color)}"></label>
@@ -1416,6 +1421,7 @@ function refreshFields() {
     else if (field === 'wall-thickness') input.value = item.thickness[selected.side];
     else if (input.type === 'checkbox') input.checked = !!item[field];
     else if (field === 'rotation') input.value = round1(item.rotation);
+    else if (field === 'height') input.value = item.height || '';
     else if (field in item) input.value = item[field];
   }
 }
@@ -1636,6 +1642,11 @@ function applyField(field, raw) {
     commit();
     return;
   }
+  if (field === 'height' && raw === '') {
+    delete item.height;
+    commit();
+    return;
+  }
   const value = Number(raw);
   if (raw === '' || !Number.isFinite(value)) return;
 
@@ -1668,7 +1679,10 @@ function applyField(field, raw) {
     resolveAllFurniture();
   } else {
     if ((field === 'width' || field === 'depth') && value < MIN_FURNITURE) return;
-    if (field === 'rotation') {
+    if (field === 'height') {
+      if (value < 1) return;
+      item.height = value;
+    } else if (field === 'rotation') {
       setRotation(item, value);
     } else if (field === 'width' || field === 'depth') {
       const [cx, cy] = furnitureCenter(item);
@@ -1989,6 +2003,7 @@ selectionEl.addEventListener('click', (e) => {
 
 document.addEventListener('keydown', (e) => {
   if (e.target.closest('input, textarea, select')) return;
+  if (is3d) return;
   if (e.key === '+' || e.key === '=') { zoomCenter(1 / 1.3); return; }
   if (e.key === '-') { zoomCenter(1.3); return; }
   if (e.key === '0') { fitView(); return; }
@@ -2035,6 +2050,56 @@ importFile.addEventListener('change', async () => {
 document.getElementById('reset').addEventListener('click', () => {
   if (!confirm('Gesamte Planung löschen und neu beginnen?')) return;
   replaceState(defaultState());
+});
+
+// ---------- 3D-Ansicht ----------
+
+let is3d = false;
+let view3d = null; // Modul view3d.js, wird beim ersten Öffnen geladen
+const view3dEl = document.getElementById('view3d');
+const toggle3dBtn = document.getElementById('toggle-3d');
+const lowWallsBtn = document.getElementById('low-walls');
+const wallHeightEl = document.getElementById('wall-height');
+
+async function setView3d(on) {
+  if (on && !view3d) {
+    toggle3dBtn.disabled = true;
+    try {
+      view3d = await import('./view3d.js');
+    } catch {
+      alert('Die 3D-Ansicht konnte nicht geladen werden. Sie funktioniert nur über die Webseite '
+        + '(nicht beim direkten Öffnen der Datei) und braucht einen Browser mit WebGL.');
+      return;
+    } finally {
+      toggle3dBtn.disabled = false;
+    }
+  }
+  is3d = on;
+  document.body.classList.toggle('mode-3d', on);
+  toggle3dBtn.textContent = on ? '2D-Grundriss' : '3D-Ansicht';
+  wallHeightEl.value = state.wallHeight;
+  if (on) {
+    if (typeof setPlanMode === 'function' && planMode) setPlanMode(null);
+    view3d.show(view3dEl);
+  } else {
+    view3d.hide();
+    render();
+  }
+}
+
+toggle3dBtn.addEventListener('click', () => setView3d(!is3d));
+lowWallsBtn.addEventListener('click', () => {
+  const low = !lowWallsBtn.classList.contains('active');
+  lowWallsBtn.classList.toggle('active', low);
+  view3d.setLowWalls(low);
+});
+document.getElementById('reset-camera').addEventListener('click', () => view3d.resetCamera());
+wallHeightEl.addEventListener('input', () => {
+  const value = Number(wallHeightEl.value);
+  if (!(value >= 100 && value <= 600)) return;
+  state.wallHeight = value;
+  save();
+  view3d.requestUpdate();
 });
 
 function replaceState(next) {

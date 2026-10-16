@@ -87,6 +87,27 @@ input[type="range"] { width: 100%; }
   display: flex;
   gap: 4px;
 }
+.view-controls, .view-controls span { align-items: center; }
+.view-controls { flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 24px); }
+.view3d-hint { transition: opacity 0.6s; }
+.view3d-hint.faded { opacity: 0; }
+.view-controls span { display: flex; gap: 4px; }
+body:not(.mode-3d) .only-3d, body.mode-3d .only-2d { display: none; }
+body.mode-3d #plan, body.mode-3d #mode-hint { display: none; }
+.view3d { position: absolute; inset: 0; }
+.view3d[hidden] { display: none; }
+.view3d-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.view3d-hint {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 32px);
+  padding: 6px 12px; border-radius: 6px; background: #1f2933cc; color: #fff; font-size: 0.8rem; pointer-events: none;
+}
+.wall-height {
+  display: flex; align-items: center; gap: 4px; padding: 4px 8px; font-size: 0.85rem;
+  background: #fff; border: 1px solid #c8ced5; border-radius: 6px; box-shadow: 0 1px 3px #0002;
+}
+.wall-height input { width: 64px; padding: 3px 4px; }
+.view-controls button.primary { background: #2f6fde; color: #fff; }
+.view-controls button.active { background: #2f6fde; color: #fff; }
 .view-controls button {
   min-width: 36px;
   background: #fff;
