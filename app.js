@@ -2061,17 +2061,44 @@ const toggle3dBtn = document.getElementById('toggle-3d');
 const lowWallsBtn = document.getElementById('low-walls');
 const wallHeightEl = document.getElementById('wall-height');
 
+// Muss bei Änderungen an view3d.js erhöht werden (umgeht alte Dateien im Browser-Cache).
+const VIEW3D_VERSION = 7;
+
+function hasWebGL() {
+  try {
+    const canvas = document.createElement('canvas');
+    return !!(canvas.getContext('webgl2') || canvas.getContext('webgl'));
+  } catch {
+    return false;
+  }
+}
+
 async function setView3d(on) {
+  if (on && !hasWebGL()) {
+    alert('Die 3D-Ansicht braucht WebGL, das in diesem Browser gerade nicht verfügbar ist.\n\n'
+      + 'Meist hilft es, in den Browser-Einstellungen die Hardwarebeschleunigung einzuschalten '
+      + '(Chrome/Edge: Einstellungen → System → „Grafikbeschleunigung verwenden“) und den Browser neu zu starten.');
+    return;
+  }
   if (on && !view3d) {
     toggle3dBtn.disabled = true;
     try {
-      view3d = await import('./view3d.js');
-    } catch {
+      view3d = await import(`./view3d.js?v=${VIEW3D_VERSION}`);
+    } catch (err) {
       alert('Die 3D-Ansicht konnte nicht geladen werden. Sie funktioniert nur über die Webseite '
-        + '(nicht beim direkten Öffnen der Datei) und braucht einen Browser mit WebGL.');
+        + `(nicht beim direkten Öffnen der Datei).\n\nTechnische Meldung: ${err && err.message ? err.message : err}`);
       return;
     } finally {
       toggle3dBtn.disabled = false;
+    }
+  }
+  if (on) {
+    try {
+      view3d.show(view3dEl);
+    } catch (err) {
+      view3d.hide();
+      alert(`Die 3D-Ansicht konnte nicht gestartet werden.\n\nTechnische Meldung: ${err && err.message ? err.message : err}`);
+      return;
     }
   }
   is3d = on;
@@ -2080,7 +2107,6 @@ async function setView3d(on) {
   wallHeightEl.value = state.wallHeight;
   if (on) {
     if (typeof setPlanMode === 'function' && planMode) setPlanMode(null);
-    view3d.show(view3dEl);
   } else {
     view3d.hide();
     render();

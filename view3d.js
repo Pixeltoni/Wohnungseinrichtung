@@ -1,8 +1,8 @@
 // 3D-Ansicht der Wohnung mit three.js. Baut aus dem Grundriss (state und
 // Geometrie-Funktionen aus app.js) Böden, Wände, Öffnungen und Möbel.
 // Koordinaten: Grundriss x → 3D x, Grundriss y → 3D z, Höhe → 3D y; Einheit cm.
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as THREE from './vendor/three/three.module.min.js';
+import { OrbitControls } from './vendor/three/addons/controls/OrbitControls.js';
 
 const DOOR_HEIGHT = 210;
 const WINDOW_SILL = 90;
