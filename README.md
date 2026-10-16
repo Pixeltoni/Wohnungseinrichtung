@@ -29,6 +29,8 @@ Unter **„Grundriss importieren“** ein Bild des Grundrisses hochladen (JPG/PN
 
 Zuerst **„Maßstab festlegen“**: zwei Punkte einer Strecke mit bekannter Länge anklicken und die echte Länge eingeben. Dann **„Räume nachzeichnen“**: Rechtecke entlang der Innenkanten der Räume ziehen.
 
+Mit den Reglern **„Deckkraft des Bilds“** und **„Deckkraft des Grundrisses“** lässt sich einstellen, wie stark Bild bzw. gezeichneter Grundriss (Räume, Wände, Möbel) sichtbar sind; Auswahl und Griffe bleiben dabei immer voll sichtbar.
+
 Danach sind alle Räume ganz normal bearbeitbar (Maße, Wände, Türen, Fenster).
 
 ## 3D-Ansicht

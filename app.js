@@ -105,6 +105,7 @@ function defaultState() {
     features: [],
     customCatalog: [], // eigene Möbel-Vorlagen
     wallHeight: 250, // für die 3D-Ansicht
+    planOpacity: 1, // Deckkraft des gezeichneten Grundrisses
     background: null, // Grundrissbild: { dataUrl, width, height (px), scale (cm/px), x, y, opacity, visible }
   };
 }
@@ -141,6 +142,7 @@ function normalize(data) {
     && (ft.type === 'chamfer' ? CORNERS.includes(ft.corner) : SIDES.includes(ft.side))
     && ft.width > 0 && ft.depth > 0);
   if (!(data.wallHeight >= 100 && data.wallHeight <= 600)) data.wallHeight = 250;
+  if (!(data.planOpacity >= 0.1 && data.planOpacity <= 1)) data.planOpacity = 1;
   if (!Array.isArray(data.customCatalog)) data.customCatalog = [];
   data.customCatalog = data.customCatalog.filter((c) => c && c.name && c.width > 0 && c.depth > 0);
   const bg = data.background;
@@ -991,7 +993,11 @@ function render() {
     ${removedWalls}
     ${openings}
     ${furniture}
-    ${doorSwings}
+    ${doorSwings}`;
+  // Deckkraft des gezeichneten Grundrisses (z. B. um das Grundrissbild darunter zu sehen).
+  contentLayer.setAttribute('opacity', state.planOpacity);
+  // Auswahl, Griffe und Hilfslinien bleiben immer voll sichtbar.
+  overlayLayer.innerHTML = `
     ${selectionOverlay()}
     ${resizeHandles(font)}
     ${furnitureHandles(font)}
@@ -1009,10 +1015,12 @@ svg.innerHTML = `
   </defs>
   <rect id="grid-layer" fill="url(#grid)" />
   <image id="bg-layer" preserveAspectRatio="none" pointer-events="none" />
-  <g id="content-layer"></g>`;
+  <g id="content-layer"></g>
+  <g id="overlay-layer"></g>`;
 const gridLayer = svg.querySelector('#grid-layer');
 const bgLayer = svg.querySelector('#bg-layer');
 const contentLayer = svg.querySelector('#content-layer');
+const overlayLayer = svg.querySelector('#overlay-layer');
 let bgLayerSrc = null;
 
 function renderBackground(vb) {

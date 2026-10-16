@@ -14,6 +14,7 @@ const importEls = {
   calibrate: document.getElementById('plan-calibrate'),
   trace: document.getElementById('plan-trace'),
   opacity: document.getElementById('plan-opacity'),
+  planOpacity: document.getElementById('plan-layer-opacity'),
   toggle: document.getElementById('plan-toggle'),
   remove: document.getElementById('plan-remove'),
   scaleInfo: document.getElementById('plan-scale'),
@@ -86,6 +87,7 @@ function updateImportPanel() {
   importEls.tools.hidden = !bg;
   if (!bg) return;
   importEls.opacity.value = Math.round(bg.opacity * 100);
+  importEls.planOpacity.value = Math.round(state.planOpacity * 100);
   importEls.toggle.textContent = bg.visible ? 'Bild ausblenden' : 'Bild einblenden';
   importEls.scaleInfo.textContent = `Bild: ${Math.round(bg.width * bg.scale)} × ${Math.round(bg.height * bg.scale)} cm`
     + ` (1 Pixel = ${bg.scale.toFixed(2)} cm)`;
@@ -240,6 +242,11 @@ importEls.calibrate.addEventListener('click', () => setPlanMode(planMode?.type =
 importEls.trace.addEventListener('click', () => setPlanMode(planMode?.type === 'trace' ? null : 'trace'));
 importEls.opacity.addEventListener('input', () => {
   state.background.opacity = Number(importEls.opacity.value) / 100;
+  save();
+  render();
+});
+importEls.planOpacity.addEventListener('input', () => {
+  state.planOpacity = Number(importEls.planOpacity.value) / 100;
   save();
   render();
 });
